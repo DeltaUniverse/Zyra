@@ -1,4 +1,3 @@
-
 import asyncio
 from datetime import datetime
 from typing import (
@@ -38,7 +37,6 @@ def usage(_usage: str, optional: bool = False, reply: bool = False) -> Decorator
     def _decorator(func: CommandFunc) -> CommandFunc:
         setattr(func, "_cmd_usage", _usage)
         setattr(func, "_cmd_usage_optional", optional)
-        setattr(func, "_cmd_usage_reply", reply)
         return func
 
     return _decorator
@@ -67,7 +65,6 @@ class Command:
     desc: Optional[str]
     usage: Optional[str]
     usage_optional: bool
-    usage_reply: bool
     aliases: Iterable[str]
     filters: Optional[filters.BaseFilter]
     module: Any
@@ -82,7 +79,6 @@ class Command:
         desc: Optional[str] = None,
         usage: Optional[str] = None,
         usage_optional: bool = False,
-        usage_reply: bool = False,
         aliases: Iterable[str] = (),
     ) -> None:
         self.name = name
@@ -92,7 +88,6 @@ class Command:
         self.desc = desc
         self.usage = usage
         self.usage_optional = usage_optional
-        self.usage_reply = usage_reply
         self.aliases = aliases
 
     def __repr__(self) -> str:

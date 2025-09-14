@@ -14,7 +14,6 @@ from telegram import (
     Update,
     User,
 )
-from telegram.constants import ChatAction
 from telegram.error import TelegramError
 from telegram.ext import (
     Application,
@@ -273,32 +272,6 @@ class TelegramBot(ZyraBase):
             if k in kwargs:
                 kwargs.pop(k)
 
-        # Choose a suitable chat action once and send it
-        async def _send_action(timeout: int = 1) -> None:
-            action = ChatAction.TYPING
-            if "photo" in kwargs:
-                action = ChatAction.UPLOAD_PHOTO
-            elif "video" in kwargs:
-                action = ChatAction.UPLOAD_VIDEO
-            elif "animation" in kwargs or "document" in kwargs:
-                action = ChatAction.UPLOAD_DOCUMENT
-            elif "audio" in kwargs:
-                action = ChatAction.UPLOAD_AUDIO
-            elif "voice" in kwargs:
-                action = ChatAction.UPLOAD_VOICE
-            try:
-                await self.application.bot.send_chat_action(
-                    chat_id=msg.chat_id,
-                    action=action,
-                    read_timeout=timeout,
-                    write_timeout=timeout,
-                    connect_timeout=timeout,
-                    pool_timeout=timeout,
-                )
-            except Exception:
-                # Non-fatal; proceed with reply/edit anyway
-                pass
-
         async def reply(
             reference: Message, *, text: str = "", **kwargs: Any
         ) -> Message:
@@ -344,7 +317,6 @@ class TelegramBot(ZyraBase):
 
         # Default behavior: if mode == "edit" and we have a response, edit; else reply.
         if mode == "reply" or (response is None and mode == "edit"):
-            self.application.create_task(_send_action())
             return await reply(msg, text=text, **kwargs)
 
         if response is not None and mode == "edit":

@@ -4,7 +4,7 @@ from typing import Any
 
 import bprint
 from telegram import Message, User
-from telegram.constants import MessageLimit
+from telegram.constants import ChatAction, MessageLimit
 
 MESSAGE_CHAR_LIMIT = MessageLimit.MAX_TEXT_LENGTH
 TRUNCATION_SUFFIX = "... (truncated)"
@@ -92,3 +92,33 @@ async def send_as_document(content: str, msg: Message, caption: str) -> Message:
     with io.BytesIO(str(content).encode()) as o:
         o.name = f"{str(uuid.uuid4()).split('-')[0].upper()}.TXT"
         return await msg.reply_document(document=o, caption=f"❯ ```{caption}```")
+
+
+async def _send_action(msg: Message, timeout: float = 1.0, **kwargs: Any) -> None:
+    action = ChatAction.TYPING
+    if "photo" in kwargs:
+        action = ChatAction.UPLOAD_PHOTO
+    elif "video" in kwargs:
+        action = ChatAction.UPLOAD_VIDEO
+    elif "animation" in kwargs:
+        # Could also be UPLOAD_VIDEO; many clients show GIFs as videos
+        action = ChatAction.UPLOAD_DOCUMENT
+    elif "document" in kwargs:
+        action = ChatAction.UPLOAD_DOCUMENT
+    elif "audio" in kwargs:
+        action = ChatAction.UPLOAD_AUDIO
+    elif "voice" in kwargs:
+        action = ChatAction.UPLOAD_VOICE
+
+    try:
+        bot = msg._bot
+        await bot.send_chat_action(
+            chat_id=msg.chat_id,
+            action=action,
+            read_timeout=timeout,
+            write_timeout=timeout,
+            connect_timeout=timeout,
+            pool_timeout=timeout,
+        )
+    except Exception:
+        pass

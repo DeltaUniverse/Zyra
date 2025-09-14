@@ -28,7 +28,6 @@ class CommandDispatcher(ZyraBase):
         desc: Optional[str] = None,
         usage: Optional[str] = None,
         usage_optional: bool = False,
-        usage_reply: bool = False,
         aliases: Iterable[str] = (),
     ) -> None:
         if getattr(func, "_listener_filters", None):
@@ -42,7 +41,7 @@ class CommandDispatcher(ZyraBase):
             )
 
         cmd = command.Command(
-            name, mod, func, filters_, desc, usage, usage_optional, usage_reply, aliases
+            name, mod, func, filters_, desc, usage, usage_optional, aliases
         )
 
         if name in self.commands:
@@ -77,7 +76,6 @@ class CommandDispatcher(ZyraBase):
                     desc=getattr(func, "_cmd_description", None),
                     usage=getattr(func, "_cmd_usage", None),
                     usage_optional=getattr(func, "_cmd_usage_optional", False),
-                    usage_reply=getattr(func, "_cmd_usage_reply", False),
                     aliases=getattr(func, "_cmd_aliases", ()),
                 )
                 done = True
