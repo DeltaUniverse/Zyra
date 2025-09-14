@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING, Any, Iterable, MutableMapping, Optional
 
 from telegram import Update
 from telegram.error import BadRequest
-from telegram.ext import Application, ContextTypes, PrefixHandler, filters
+from telegram.ext import Application, CommandHandler, ContextTypes, filters
 
 from .. import command, module, util
 from .base import ZyraBase
@@ -93,7 +93,7 @@ class CommandDispatcher(ZyraBase):
         for cmd in to_unreg:
             self.unregister_command(cmd)
 
-    # kept for compatibility (not used when PrefixHandler is active)
+    # kept for compatibility (not used when CommandHandler is active)
     def command_predicate(self: "Zyra") -> filters.BaseFilter:
         class CustomCommandFilter(filters.MessageFilter):
             def __init__(self, zyra_instance: "Zyra"):
@@ -116,7 +116,6 @@ class CommandDispatcher(ZyraBase):
                         return False
 
                     if cmd.filters:
-                        # let PTB handle combined BaseFilter normally; this branch is legacy
                         if isinstance(cmd.filters, filters.MessageFilter):
                             if inspect.iscoroutinefunction(cmd.filters.filter):
                                 if not await cmd.filters.filter(message):
@@ -133,33 +132,41 @@ class CommandDispatcher(ZyraBase):
     async def on_command(
         self: "Zyra", update: Update, context: ContextTypes.DEFAULT_TYPE
     ) -> None:
+        """
+        Entry point for PTB CommandHandler.
+
+        Notes:
+        - PTB handles the leading command prefix (defaults to '/').
+          If you want a custom prefix like '.', configure it via ApplicationBuilder
+          Defaults(command_prefix=self.prefix) when building the Application.
+        - context.args is prepared by CommandHandler.
+        """
         message = update.effective_message
-        if not message or not message.text:
+        if not message:
             return
 
-        text = message.text
-        if not text.startswith(self.prefix):
+        # Prefer text; if captioned commands are desired, adjust accordingly
+        text = message.text or ""
+        if not text:
             return
 
-        parts = text.split()
-        if not parts:
-            return
+        # Extract the command token (first word), strip prefix and optional @botusername
+        first = text.split(maxsplit=1)[0]
+        token = first.lstrip("/").split("@", 1)[0]
 
-        cmd_name = parts[0][len(self.prefix) :]
-        cmd = self.commands.get(cmd_name)
+        cmd = self.commands.get(token)
         if not cmd:
             return
 
-        # PTB PrefixHandler prepares args (CallbackContext.args)
         args = list(getattr(context, "args", []) or [])
-        segments = [cmd_name, *args]
+        segments = [token, *args]
+
+        # Compute offset to the first arg char (best-effort; OK if no args)
+        # Example: "/echo hello world" -> offset points right after "/echo "
+        offset = len(first) + 1 if len(text) > len(first) else len(first)
 
         ctx = command.Context(
-            self,
-            message,
-            len(self.prefix) + len(cmd_name) + 1,
-            segments=segments,
-            ptb_context=context,
+            self, message, offset, segments=segments, ptb_context=context
         )
 
         try:
@@ -177,17 +184,24 @@ class CommandDispatcher(ZyraBase):
         await self.dispatch_event("command", cmd, message)
 
     def setup_command_handler(self: "Zyra", application: Application) -> None:
-        """Setup per-command PrefixHandler (prefix is static)."""
+        """
+        Register CommandHandler per command.
+
+        To keep supporting a custom prefix such as '.', configure it at Application
+        construction time:
+            ApplicationBuilder().defaults(Defaults(command_prefix=self.prefix)).build()
+
+        This method just binds commands (names + aliases) to this dispatcher.
+        """
         seen = set()
         for name, cmd in self.commands.items():
             if name != cmd.name or cmd.name in seen:
                 continue
             seen.add(cmd.name)
 
-            handler = PrefixHandler(
-                prefix=self.prefix,
+            handler = CommandHandler(
                 command=[cmd.name, *cmd.aliases],
                 callback=self.on_command,
-                filters=cmd.filters,  # BaseFilter
+                filters=cmd.filters,  # BaseFilter remains supported
             )
             application.add_handler(handler, group=10)
