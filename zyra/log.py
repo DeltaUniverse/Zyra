@@ -1,15 +1,11 @@
 import logging
 
-colorlog_enable = True
-try:
-    import colorlog
-except ImportError:
-    colorlog_enable = False
+import colorlog
 
 level = logging.INFO
 
 
-def setup_log(colorlog_enable: bool = colorlog_enable) -> None:
+def setup_log(colorlog_enable: bool = False) -> None:
     """Configures logging"""
     logging.root.setLevel(level)
 
@@ -43,4 +39,3 @@ def setup_log(colorlog_enable: bool = colorlog_enable) -> None:
     logging.getLogger("urllib3").setLevel(logging.WARNING)
     logging.getLogger("telegram.ext.Application").setLevel(logging.WARNING)
     logging.getLogger("telegram.ext._application").setLevel(logging.WARNING)
-    logging.getLogger("google.genai").setLevel(logging.ERROR)
