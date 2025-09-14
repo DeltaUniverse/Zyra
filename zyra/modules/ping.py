@@ -8,7 +8,7 @@ class Ping(module.Module):
     name: ClassVar = "ping"
 
     @command.desc("Check if the bot is alive and measure latency")
-    async def cmd_sping(self, ctx: command.Context):
+    async def cmd_ping(self, ctx: command.Context):
         await util.tg._send_action(ctx.msg)
         start = time.perf_counter()
         await ctx.respond("🏓 <b>Pong...</b>")
