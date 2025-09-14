@@ -6,3 +6,7 @@ prefix = "/"
 redact_responses = true
 overflow_page_limit = 3
 colorlog = true
+
+["rank"]
+owner_id = 0
+sudo_users = []

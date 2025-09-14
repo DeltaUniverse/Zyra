@@ -48,9 +48,9 @@ ALLOWED_EVENT: list[str] = [
 class TelegramBot(ZyraBase):
     application: Application
     client: Bot
+    owner: int
     prefix: str
     user: User
-    uid: int
     start_time_us: int
     _handlers: dict[str, Tuple[Handler, int]]
     __idle__: asyncio.Task[None]
@@ -78,6 +78,7 @@ class TelegramBot(ZyraBase):
         )
         self.client = self.application.bot
         self.prefix = self.config["bot"]["prefix"]
+        self.owner = self.config["rank"]["owner_id"]
         self.update_module_events()
 
     async def start(self: "Zyra") -> None:
@@ -93,7 +94,6 @@ class TelegramBot(ZyraBase):
         # Register per-command handlers after Application is running
         self.setup_command_handler(self.application)
         self.user = await self.application.bot.get_me()
-        self.uid = self.user.id  # type: ignore[attr-defined]
         self.start_time_us = time.usec()
         await self.dispatch_event("start", self.start_time_us)
         self.log.info("Bot is ready")
