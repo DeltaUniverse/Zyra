@@ -1,6 +1,5 @@
 # Zyra
 
-![GitHub release (latest by date)](https://img.shields.io/github/v/release/DeltaUniverse/Zyra?style=flat-square)
 ![PyPI - Python Version](https://img.shields.io/pypi/pyversions/zyra?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-green.svg?style=flat-square)
 ![Framework](https://img.shields.io/badge/framework-Python%20Telegram%20Bot-blue.svg?style=flat-square)
