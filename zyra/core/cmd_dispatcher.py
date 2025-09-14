@@ -170,7 +170,7 @@ class CommandDispatcher(ZyraBase):
                 await ctx.respond(ret)
         except BadRequest as e:
             if "message is not modified" in str(e).lower():
-                cmd.module.log.warning(
+                cmd.module.log.error(
                     f"Command '{cmd.name}' triggered a message edit with no changes"
                 )
             else:
