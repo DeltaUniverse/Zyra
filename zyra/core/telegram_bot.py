@@ -48,7 +48,7 @@ ALLOWED_EVENT: list[str] = [
 class TelegramBot(ZyraBase):
     application: Application
     client: Bot
-    owner: int
+    owner_id: int
     prefix: str
     user: User
     start_time_us: int
@@ -78,7 +78,7 @@ class TelegramBot(ZyraBase):
         )
         self.client = self.application.bot
         self.prefix = self.config["bot"]["prefix"]
-        self.owner = self.config["rank"]["owner_id"]
+        self.owner_id = self.config["rank"]["owner_id"]
         self.update_module_events()
 
     async def start(self: "Zyra") -> None:
