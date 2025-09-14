@@ -1,0 +1,8 @@
+[telegram]
+token = "YOUR_BOT_TOKEN"
+
+[bot]
+prefix = "/"
+redact_responses = true
+overflow_page_limit = 3
+colorlog = true
