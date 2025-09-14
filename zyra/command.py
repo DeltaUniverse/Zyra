@@ -137,7 +137,7 @@ class Context:
 
         self.input = (self.msg.text or "")[self.cmd_len :]
 
-        self.ptb: Optional[CallbackContext] = ptb_context
+        self.ptb_context: Optional[CallbackContext] = ptb_context
 
     def __getattr__(self, name: str) -> Any:
         if name == "args":
