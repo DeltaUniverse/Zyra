@@ -5,6 +5,7 @@ from functools import partial
 from typing import TYPE_CHECKING, Any, List, Optional, Tuple, Union
 
 from telegram import (
+    Bot,
     CallbackQuery,
     ChosenInlineResult,
     InlineQuery,
@@ -47,6 +48,7 @@ ALLOWED_EVENT: list[str] = [
 
 class TelegramBot(ZyraBase):
     application: Application
+    client: Bot
     prefix: str
     user: User
     uid: int
@@ -75,6 +77,7 @@ class TelegramBot(ZyraBase):
             )
             .build()
         )
+        self.client = self.application.bot
         self.prefix = self.config["bot"]["prefix"]
         self.update_module_events()
 
