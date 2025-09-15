@@ -95,7 +95,6 @@ class TelegramBot(ZyraBase):
         await self.application.start()
         await self.application.updater.start_polling(allowed_updates=ALLOWED_EVENT)
         self.loaded = True
-        self.setup_command_handler(self.application)
         self.user = await self.application.bot.get_me()
         self.start_time_us = time.usec()
         await self.dispatch_event("start", self.start_time_us)
