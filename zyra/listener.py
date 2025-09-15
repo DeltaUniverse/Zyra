@@ -1,4 +1,11 @@
-# zyra/core/listener.py
+"""
+Listener decorators and helper class for event handling in Zyra.
+
+This module provides decorators to register functions as Telegram bot listeners
+for different update types (messages, commands, callbacks, inline queries, etc.).
+It also includes metadata decorators for priority, description, and usage, as
+well as the Listener class to encapsulate handler information.
+"""
 
 from typing import Any, Callable, Optional
 
@@ -101,31 +108,31 @@ def on_chat_action(filters: Optional[ptb_filters.BaseFilter] = None) -> Decorato
 
 
 def on_load(func: ListenerFunc) -> ListenerFunc:
-    """Register function as load event handler."""
+    """Register function as load event handler (called when module loads)."""
     setattr(func, "_listener_event", "load")
     return func
 
 
 def on_start(func: ListenerFunc) -> ListenerFunc:
-    """Register function as start event handler."""
+    """Register function as start event handler (called before bot starts)."""
     setattr(func, "_listener_event", "start")
     return func
 
 
 def on_started(func: ListenerFunc) -> ListenerFunc:
-    """Register function as started event handler."""
+    """Register function as started event handler (called after bot starts)."""
     setattr(func, "_listener_event", "started")
     return func
 
 
 def on_stop(func: ListenerFunc) -> ListenerFunc:
-    """Register function as stop event handler."""
+    """Register function as stop event handler (called before bot stops)."""
     setattr(func, "_listener_event", "stop")
     return func
 
 
 def on_stopped(func: ListenerFunc) -> ListenerFunc:
-    """Register function as stopped event handler."""
+    """Register function as stopped event handler (called after bot stops)."""
     setattr(func, "_listener_event", "stopped")
     return func
 
@@ -153,14 +160,19 @@ def on_command(
 
 
 class Listener:
-    event: str
-    func: ListenerFunc
-    module: Any
-    priority: int
-    filters: Optional[ptb_filters.BaseFilter]
-    commands: tuple[str, ...]
-    description: Optional[str]
-    usage: Optional[str]
+    """
+    Encapsulates a registered event listener.
+
+    Attributes:
+        event: The event type this listener handles (e.g., "message", "callback_query").
+        func: The function to execute when the event is triggered.
+        module: The module instance this listener belongs to.
+        priority: Execution priority (lower runs first).
+        filters: Optional PTB filter for event matching.
+        commands: Registered commands if event is command-based.
+        description: Optional description for help system.
+        usage: Optional usage example for help system.
+    """
 
     def __init__(
         self,
@@ -173,6 +185,7 @@ class Listener:
         description: Optional[str] = None,
         usage: Optional[str] = None,
     ) -> None:
+        """Initialize a new Listener instance."""
         self.event = event
         self.func = func
         self.module = module
@@ -183,8 +196,10 @@ class Listener:
         self.usage = usage
 
     def __lt__(self, other: "Listener") -> bool:
+        """Compare listeners by priority (for sorting)."""
         return self.priority < other.priority
 
     def __repr__(self) -> str:
+        """Return a concise string representation of the listener."""
         cmds = f" commands={self.commands}" if self.commands else ""
         return f"<Listener event={self.event} module={self.module.name}{cmds} prio={self.priority}>"
