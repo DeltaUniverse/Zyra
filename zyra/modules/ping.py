@@ -1,17 +1,33 @@
-import time
+# zyra/modules/ping.py
+
+import time as _time
 from typing import ClassVar
 
-from .. import command, module, util
+from telegram import Update
+from telegram.ext import ContextTypes
+
+from .. import listener, module
+from ..util import time
 
 
 class Ping(module.Module):
-    name: ClassVar = "ping"
+    name: ClassVar[str] = "ping"
 
-    @command.desc("Check if the bot is alive and measure latency")
-    async def cmd_ping(self, ctx: command.Context):
-        await util.tg._send_action(ctx.msg)
-        start = time.perf_counter()
-        await ctx.respond("🏓 <b>Pong...</b>")
-        end = time.perf_counter()
-        latency_ms = (end - start) * 1000
-        await ctx.respond(f"🏓 Pong! <code>{latency_ms:.0f} ms</code>")
+    @listener.on_commands("ping", "p")
+    @listener.desc("Check if the bot is alive and measure latency")
+    @listener.usage("ping - Test bot responsiveness")
+    async def handle_ping(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
+        msg = update.effective_message
+        if not msg:
+            return
+
+        start = _time.perf_counter()
+        sent = await msg.reply_text("...")
+        end = _time.perf_counter()
+
+        latency_us = int((end - start) * 1_000_000)
+        latency_str = time.format_duration_us(latency_us)
+
+        await sent.edit_text(f"Pong! <b>{latency_str}</b>")
