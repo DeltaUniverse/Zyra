@@ -7,9 +7,7 @@ Telegram update types, and forwarding events to the `EventDispatcher`.
 
 import asyncio
 import datetime
-import html
 import signal
-import traceback
 from functools import partial
 from typing import TYPE_CHECKING, Any, List, Tuple, Union
 
@@ -37,7 +35,7 @@ from telegram.ext import (
     filters,
 )
 
-from ..util import time
+from ..util import error, time
 from .base import ZyraBase
 
 if TYPE_CHECKING:
@@ -106,27 +104,12 @@ class TelegramBot(ZyraBase):
         self.client = self.application.bot
         self.prefix = self.config["bot"]["prefix"]
         self.owner_id = self.config["rank"]["owner_id"]
-        self.application.add_error_handler(self._on_error)
+        self.application.add_error_handler(
+            error.make_error_handler(
+                self.owner_id, logger=self.log, redact=self.redact_message
+            )
+        )
         self.update_module_events()
-
-    async def _on_error(
-        self: "Zyra", update: Update, context: ContextTypes.DEFAULT_TYPE
-    ) -> None:
-        """PTB error hook: log and forward exceptions to the owner."""
-        self.log.error("Exception in handler", exc_info=context.error)
-
-        try:
-            tb = "".join(
-                traceback.format_exception(
-                    type(context.error), context.error, context.error.__traceback__
-                )
-            )
-            msg = f"⚠️ <b>Exception</b>:\n<pre>{html.escape(tb)}</pre>"
-            await context.bot.send_message(
-                chat_id=self.owner_id, text=msg, parse_mode="HTML"
-            )
-        except Exception as send_err:
-            self.log.error("Failed to notify owner", exc_info=send_err)
 
     async def start(self: "Zyra") -> None:
         """Start polling and dispatch lifecycle events.
