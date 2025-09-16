@@ -1,3 +1,16 @@
+"""Dynamically loads all submodules within this package.
+
+This `__init__.py` file serves as a meta-loader for the package it resides in.
+It automatically discovers and imports all `.py` files in the same directory,
+making them available in the `submodules` list for other parts of the
+application to use.
+
+Additionally, it includes a mechanism to handle hot-reloading. When this
+package is reloaded (e.g., during development), it will also automatically
+reload all of its discovered submodules to ensure changes are applied without
+a full application restart.
+"""
+
 import importlib
 import pkgutil
 from pathlib import Path
@@ -17,4 +30,6 @@ try:
         for module in submodules:
             importlib.reload(module)
 except NameError:
+    # This flag is set on the first import. On subsequent reloads, the
+    # NameError will not be raised, and the 'if' block above will execute.
     _reload_flag = True

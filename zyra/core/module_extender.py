@@ -1,4 +1,8 @@
-"""Module for extending the bot with module-loading capabilities."""
+"""Module for extending the bot with module-loading capabilities.
+
+This component provides the core logic for a modular bot architecture,
+allowing features to be added, removed, and reloaded dynamically.
+"""
 
 import importlib
 import inspect
@@ -13,7 +17,16 @@ if TYPE_CHECKING:
 
 
 class ModuleExtender(ZyraBase):
-    """A mixin for the Zyra bot that handles loading, unloading, and reloading modules."""
+    """A mixin for the Zyra bot that handles loading, unloading, and reloading modules.
+
+    This class manages the lifecycle of all modules, including discovering them
+    from standard and custom directories, instantiating them, and registering
+    their event listeners.
+
+    Attributes:
+        modules (MutableMapping[str, module.Module]): A dictionary mapping
+            module names to their active instances.
+    """
 
     # Initialized during instantiation
     modules: MutableMapping[str, module.Module]
@@ -52,7 +65,7 @@ class ModuleExtender(ZyraBase):
         mod = cls(self)
         mod.comment = comment
         self.register_listeners(mod)
-        self.register_commands(mod)
+        # self.register_commands(mod) is deprecated
         self.modules[cls.name] = mod
 
     def unload_module(self: "Zyra", mod: module.Module) -> None:
@@ -68,7 +81,7 @@ class ModuleExtender(ZyraBase):
         self.log.info("Unloading %s", mod.format_desc(mod.comment))
 
         self.unregister_listeners(mod)
-        self.unregister_commands(mod)
+        # self.unregister_commands(mod) is deprecated
         del self.modules[cls.name]
 
     def _load_all_from_metamod(
@@ -98,7 +111,11 @@ class ModuleExtender(ZyraBase):
                 self.load_module(cls, comment=comment)
 
     def load_all_modules(self: "Zyra") -> None:
-        """Load all standard and custom modules."""
+        """Load all standard and custom modules.
+
+        Scans the predefined `modules` and `custom_modules` packages and loads
+        all discovered modules.
+        """
         self.log.info("Loading modules")
         self._load_all_from_metamod(modules.submodules)
         self._load_all_from_metamod(custom_modules.submodules, comment="custom")

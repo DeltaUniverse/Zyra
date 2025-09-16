@@ -1,3 +1,10 @@
+"""Handles the registration, management, and dispatching of events.
+
+This module is the core of the bot's event-driven architecture. It allows
+different parts of the bot (modules) to listen and react to various lifecycle
+and Telegram events, including messages and commands.
+"""
+
 import asyncio
 import bisect
 import inspect
@@ -24,12 +31,25 @@ _LIFECYCLE_NAME_MAP = {
 
 
 class EventDispatcher(ZyraBase):
-    """Dispatches lifecycle and update events to class-module listeners."""
+    """Dispatches lifecycle and update events to class-module listeners.
+
+    This class manages all event listeners, including command handlers. It maps
+    events to listener functions, handles listener priorities, and creates
+    the context for event handlers.
+
+    Attributes:
+        listeners (MutableMapping[str, MutableSequence[Listener]]): A dictionary
+            mapping event names to a sorted list of `Listener` objects.
+        command_map (MutableMapping[str, Listener]): A dictionary mapping
+            command names to their corresponding `Listener` object for quick
+            lookup.
+    """
 
     listeners: MutableMapping[str, MutableSequence[Listener]]
     command_map: MutableMapping[str, Listener]
 
     def __init__(self: "Zyra", **kwargs: Any) -> None:
+        """Initializes the EventDispatcher."""
         self.listeners = {}
         self.command_map = {}
         super().__init__(**kwargs)
@@ -46,6 +66,25 @@ class EventDispatcher(ZyraBase):
         description: Optional[str] = None,
         usage: Optional[str] = None,
     ) -> None:
+        """Registers a new event listener.
+
+        Creates a `Listener` object and adds it to the internal listeners mapping.
+        If the listener is for a command, it's also added to the command map.
+
+        Args:
+            mod: The module instance that owns the listener.
+            event: The name of the event to listen for (e.g., 'message').
+            func: The coroutine function to be called when the event occurs.
+            priority: The priority of the listener. Lower numbers run first.
+            filters_: An optional `python-telegram-bot` filter to apply.
+            commands: A tuple of command names associated with this listener.
+            description: An optional description for the command.
+            usage: An optional usage string for the command.
+
+        Raises:
+            module.ExistingCommandError: If a command is already registered
+                by another module.
+        """
         if filters_ and event in {"load", "start", "started", "stop", "stopped"}:
             self.log.warning("Built-in events can't use filters. Removing...")
             filters_ = None
@@ -78,6 +117,14 @@ class EventDispatcher(ZyraBase):
         self.update_module_events()
 
     def unregister_listener(self: "Zyra", listener: Listener) -> None:
+        """Unregisters a specific listener.
+
+        Removes the listener from the event listeners list and from the
+        command map if it's a command listener.
+
+        Args:
+            listener: The `Listener` object to unregister.
+        """
         lst = self.listeners.get(listener.event)
         if not lst:
             return
@@ -94,6 +141,15 @@ class EventDispatcher(ZyraBase):
         self.update_module_events()
 
     def register_listeners(self: "Zyra", mod: module.Module) -> None:
+        """Registers all listeners found within a given module.
+
+        Scans a module instance for methods decorated as listeners and
+        registers them. Also registers standard lifecycle methods like
+        `on_load` and `on_start`.
+
+        Args:
+            mod: The module instance to scan for listeners.
+        """
         for name, func in inspect.getmembers(
             mod.__class__, predicate=inspect.isfunction
         ):
@@ -120,6 +176,11 @@ class EventDispatcher(ZyraBase):
                     self.register_listener(mod, event, bound, priority=0)
 
     def unregister_listeners(self: "Zyra", mod: module.Module) -> None:
+        """Unregisters all listeners associated with a given module.
+
+        Args:
+            mod: The module whose listeners should be unregistered.
+        """
         to_remove: list[Listener] = []
         for items in self.listeners.values():
             for listener in items:
@@ -132,7 +193,23 @@ class EventDispatcher(ZyraBase):
     def _create_context(
         self: "Zyra", update: Update, command: str = "", cmd_len: int = 0
     ) -> Context:
-        """Create a Context object from Update."""
+        """Creates a Context object from a Telegram Update.
+
+        This helper function parses an `Update` to extract relevant information
+        like the message text and command arguments, and encapsulates it in a
+        `Context` object for easy use in handlers.
+
+        Args:
+            update: The incoming `Update` from `python-telegram-bot`.
+            command: The name of the command being executed, if any.
+            cmd_len: The length of the command text in the message.
+
+        Returns:
+            A `Context` object populated with data from the update.
+
+        Raises:
+            ValueError: If the update does not contain an effective message.
+        """
         if not update.effective_message:
             raise ValueError("Update has no effective message")
 
@@ -159,6 +236,18 @@ class EventDispatcher(ZyraBase):
     async def dispatch_event(
         self: "Zyra", event: str, *args: Any, wait: bool = True, **kwargs: Any
     ) -> None:
+        """Dispatches an event to all registered listeners.
+
+        Finds all listeners for a given event and executes them. It handles
+        command detection, context creation, and filter application.
+
+        Args:
+            event: The name of the event to dispatch.
+            *args: Positional arguments to pass to the listener functions.
+                Typically, this will be the `Update` object.
+            wait: If `True`, waits for all listener tasks to complete.
+            **kwargs: Keyword arguments (currently unused).
+        """
         listeners = self.listeners.get(event)
         if not listeners:
             return
@@ -249,4 +338,12 @@ class EventDispatcher(ZyraBase):
             await asyncio.wait(tasks)
 
     async def log_stat(self: "Zyra", stat: str) -> None:
+        """Dispatches a special statistics event.
+
+        This is a convenience method for logging stats, which triggers the
+        'stat_event' for any interested listeners.
+
+        Args:
+            stat: The name of the statistic to log.
+        """
         await self.dispatch_event("stat_event", stat, wait=False)

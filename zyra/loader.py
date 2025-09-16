@@ -1,3 +1,10 @@
+"""Initializes the asyncio event loop and runs the bot.
+
+This module is responsible for setting up the appropriate high-performance
+asyncio event loop policy (`uvloop` on Linux/macOS, `Proactor` on Windows)
+and then using `aiorun` to start and manage the bot's lifecycle.
+"""
+
 import asyncio
 import logging
 import sys
@@ -12,7 +19,15 @@ aiorun.logger.disabled = True
 
 
 def main(config: MutableMapping[str, Any]) -> None:
-    """Main entry point for the Zyra bot loader."""
+    """Sets up the event loop and starts the Zyra bot.
+
+    This function selects the optimal asyncio event loop for the current
+    operating system, creates a new loop, and then starts the bot's asynchronous
+    `create_and_run` lifecycle using the `aiorun` library.
+
+    Args:
+        config: The bot's configuration dictionary.
+    """
     if sys.platform == "win32":
         policy = asyncio.WindowsProactorEventLoopPolicy()
         asyncio.set_event_loop_policy(policy)
