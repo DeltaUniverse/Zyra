@@ -260,28 +260,28 @@ class TelegramBot(ZyraBase):
     ) -> None:
         """Handler for forwarding message updates to the EventDispatcher."""
         if update.effective_message:
-            await self.dispatch_event("message", update)
+            await self.dispatch_event("message", update, context)
 
     async def _evt_callback(
         self: "Zyra", update: Update, context: ContextTypes.DEFAULT_TYPE
     ) -> None:
         """Handler for forwarding callback_query updates to the EventDispatcher."""
         if update.callback_query:
-            await self.dispatch_event("callback_query", update)
+            await self.dispatch_event("callback_query", update, context)
 
     async def _evt_inline(
         self: "Zyra", update: Update, context: ContextTypes.DEFAULT_TYPE
     ) -> None:
         """Handler for forwarding inline_query updates to the EventDispatcher."""
         if update.inline_query:
-            await self.dispatch_event("inline_query", update)
+            await self.dispatch_event("inline_query", update, context)
 
     async def _evt_chosen(
         self: "Zyra", update: Update, context: ContextTypes.DEFAULT_TYPE
     ) -> None:
         """Handler for forwarding chosen_inline_result updates to the EventDispatcher."""
         if update.chosen_inline_result:
-            await self.dispatch_event("chosen_inline_result", update)
+            await self.dispatch_event("chosen_inline_result", update, context)
 
     @property
     def events_activated(self: "Zyra") -> int:

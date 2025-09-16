@@ -41,7 +41,7 @@ class Context:
         invoker (str): The command or first word of the message.
         input (str): The raw text of the message after the command.
         update (Optional[telegram.Update]): The raw `Update` object from PTB.
-        ptb_context (Optional[CallbackContext]): The raw `CallbackContext` from PTB.
+        _raw_ctx (Optional[CallbackContext]): The raw `CallbackContext` from PTB.
     """
 
     def __init__(
@@ -52,7 +52,7 @@ class Context:
         *,
         segments: Sequence[str],
         update: Optional[Update] = None,
-        ptb_context: Optional[CallbackContext] = None,
+        _raw_ctx: Optional[CallbackContext] = None,
     ) -> None:
         """Initializes the Context object.
 
@@ -62,7 +62,7 @@ class Context:
             cmd_len: The length of the invoked command in the message text.
             segments: The message text split by whitespace.
             update: The raw `Update` object.
-            ptb_context: The raw `CallbackContext` object.
+            _raw_ctx: The raw `CallbackContext` object.
         """
         self.bot = bot
         self.chat = message.chat
@@ -75,16 +75,16 @@ class Context:
         self.last_update_time = None
         self.input = (self.msg.text or "")[self.cmd_len :]
         self.update = update
-        self.ptb_context = ptb_context
+        self._raw_ctx = _raw_ctx
 
     @property
     def args(self) -> Sequence[str]:
         """Returns the command arguments as a list of strings."""
         if (
-            self.ptb_context is not None
-            and getattr(self.ptb_context, "args", None) is not None
+            self._raw_ctx is not None
+            and getattr(self._raw_ctx, "args", None) is not None
         ):
-            return list(self.ptb_context.args)
+            return list(self._raw_ctx.args)
 
         return self.segments[1:]
 
