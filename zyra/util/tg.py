@@ -52,9 +52,12 @@ def filter_code_block(inp: str) -> str:
         else:
             parts = inner.split("\n", 1)
             inner = parts[1] if len(parts) > 1 else ""
+
         return inner
+
     if inp.startswith("`") and inp.endswith("`"):
         return inp[1:-1]
+
     return inp
 
 
@@ -79,8 +82,10 @@ def truncate(text: str) -> str:
     suffix = TRUNCATION_SUFFIX
     if text.endswith("```"):
         suffix += "```"
+
     if len(text) > MESSAGE_CHAR_LIMIT:
         return text[: MESSAGE_CHAR_LIMIT - len(suffix)] + suffix
+
     return text
 
 

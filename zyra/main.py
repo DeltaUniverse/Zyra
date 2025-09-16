@@ -12,6 +12,7 @@ def load_config(path: str = "config.toml") -> MutableMapping[str, Any]:
     cfg_path = Path(path)
     if not cfg_path.is_file():
         raise FileNotFoundError(f"Config file not found: {cfg_path}")
+
     with cfg_path.open("rb") as f:
         return tomli.load(f)
 

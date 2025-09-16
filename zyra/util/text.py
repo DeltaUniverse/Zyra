@@ -55,8 +55,10 @@ class Redactor:
         # Quick precheck—cheap substring scan
         if not any(t in text for t in self._tokens):
             return text
+
         out = text
         for t in self._tokens:
             if t in out:
                 out = out.replace(t, self._replacement)
+
         return out

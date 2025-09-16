@@ -89,10 +89,12 @@ class ModuleExtender(ZyraBase):
                 cls = getattr(module_mod, sym)
                 if not (inspect.isclass(cls) and issubclass(cls, module.Module)):
                     continue
+
                 if getattr(cls, "disabled", False):
                     # Use format_desc for consistent path + name
                     self.log.info("Skipping %s", cls.format_desc(comment))
                     continue
+
                 self.load_module(cls, comment=comment)
 
     def load_all_modules(self: "Zyra") -> None:

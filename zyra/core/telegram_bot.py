@@ -105,6 +105,7 @@ class TelegramBot(ZyraBase):
         """Sleep-loop until a termination signal is received."""
         if self.__idle__:
             raise RuntimeError("This bot instance is already running")
+
         signal_names: dict[Any, str] = {}
         for k, _ in signal.__dict__.items():
             if isinstance(k, str) and k.startswith("SIG") and not k.startswith("SIG_"):
@@ -112,6 +113,7 @@ class TelegramBot(ZyraBase):
                     sig = getattr(signal, k)
                 except Exception:
                     continue
+
                 if isinstance(sig, (int, getattr(signal, "Signals", int))):
                     signal_names[sig] = k
 
@@ -123,6 +125,7 @@ class TelegramBot(ZyraBase):
             ):
                 if sig is None:
                     continue
+
                 try:
                     self.loop.remove_signal_handler(sig)
                 except (NotImplementedError, RuntimeError):
@@ -143,6 +146,7 @@ class TelegramBot(ZyraBase):
         ):
             if sig is None:
                 continue
+
             try:
                 self.loop.add_signal_handler(sig, partial(signal_handler, sig))
             except (NotImplementedError, RuntimeError):
@@ -159,6 +163,7 @@ class TelegramBot(ZyraBase):
         """Run until stopped."""
         if self.__idle__:
             raise RuntimeError("This bot instance is already running")
+
         try:
             try:
                 await self.start()
@@ -168,6 +173,7 @@ class TelegramBot(ZyraBase):
             except TelegramError as e:
                 self.log.exception("Telegram error on startup", exc_info=e)
                 return
+
             await self.idle()
         finally:
             await self.stop()
@@ -256,4 +262,5 @@ class TelegramBot(ZyraBase):
         bot_token = self.config["telegram"].get("token")
         if bot_token and bot_token in text:
             text = text.replace(bot_token, redacted)
+
         return text

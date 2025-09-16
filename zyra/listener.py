@@ -54,6 +54,7 @@ class Context:
             and getattr(self.ptb_context, "args", None) is not None
         ):
             return list(self.ptb_context.args)
+
         return self.segments[1:]
 
     async def respond(self, text: str, **kwargs) -> Message:
@@ -102,6 +103,7 @@ def on_message(filters: Optional[ptb_filters.BaseFilter] = None) -> Decorator:
         setattr(func, "_listener_event", "message")
         if filters:
             setattr(func, "_listener_filters", filters)
+
         return func
 
     return _decorator
@@ -114,6 +116,7 @@ def on_callback_query(filters: Optional[ptb_filters.BaseFilter] = None) -> Decor
         setattr(func, "_listener_event", "callback_query")
         if filters:
             setattr(func, "_listener_filters", filters)
+
         return func
 
     return _decorator
@@ -126,6 +129,7 @@ def on_inline_query(filters: Optional[ptb_filters.BaseFilter] = None) -> Decorat
         setattr(func, "_listener_event", "inline_query")
         if filters:
             setattr(func, "_listener_filters", filters)
+
         return func
 
     return _decorator
@@ -140,6 +144,7 @@ def on_chosen_inline_result(
         setattr(func, "_listener_event", "chosen_inline_result")
         if filters:
             setattr(func, "_listener_filters", filters)
+
         return func
 
     return _decorator
@@ -152,6 +157,7 @@ def on_chat_action(filters: Optional[ptb_filters.BaseFilter] = None) -> Decorato
         setattr(func, "_listener_event", "chat_action")
         if filters:
             setattr(func, "_listener_filters", filters)
+
         return func
 
     return _decorator
@@ -197,6 +203,7 @@ def on_commands(
         setattr(func, "_listener_commands", commands)
         if filters:
             setattr(func, "_listener_filters", filters)
+
         return func
 
     return _decorator

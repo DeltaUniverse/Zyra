@@ -72,6 +72,7 @@ class EventDispatcher(ZyraBase):
                 raise module.ExistingCommandError(
                     f"Command '{cmd}' already registered by {other.module.name}"
                 )
+
             self.command_map[cmd] = listener
 
         self.update_module_events()
@@ -80,6 +81,7 @@ class EventDispatcher(ZyraBase):
         lst = self.listeners.get(listener.event)
         if not lst:
             return
+
         if listener in lst:
             lst.remove(listener)
             if not lst:
@@ -98,6 +100,7 @@ class EventDispatcher(ZyraBase):
             event = getattr(func, "_listener_event", None)
             if not event:
                 continue
+
             bound = getattr(mod, name)
             self.register_listener(
                 mod,
@@ -122,6 +125,7 @@ class EventDispatcher(ZyraBase):
             for listener in items:
                 if listener.module == mod:
                     to_remove.append(listener)
+
         for listener in to_remove:
             self.unregister_listener(listener)
 
@@ -183,6 +187,7 @@ class EventDispatcher(ZyraBase):
                             tasks.add(self.loop.create_task(listener.func(ctx)))
                             if wait:
                                 await asyncio.wait(tasks)
+
                             return
                         except Exception as e:
                             self.log.error(
@@ -217,6 +222,7 @@ class EventDispatcher(ZyraBase):
                             "'%s' can't be used with filters (only Message is supported)",
                             event,
                         )
+
                 if not matched:
                     continue
 
