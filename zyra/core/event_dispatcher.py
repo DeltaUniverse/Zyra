@@ -7,7 +7,7 @@ from telegram import CallbackQuery, ChosenInlineResult, InlineQuery, Message, Up
 from telegram.ext import filters
 
 from .. import module, util
-from ..listener import Listener, ListenerFunc
+from ..listener import Context, Listener, ListenerFunc
 from .base import ZyraBase
 
 if TYPE_CHECKING:
@@ -125,6 +125,33 @@ class EventDispatcher(ZyraBase):
         for listener in to_remove:
             self.unregister_listener(listener)
 
+    def _create_context(
+        self: "Zyra", update: Update, command: str = "", cmd_len: int = 0
+    ) -> Context:
+        """Create a Context object from Update."""
+        if not update.effective_message:
+            raise ValueError("Update has no effective message")
+
+        message = update.effective_message
+        text = message.text or ""
+
+        # Parse command and arguments
+        if text.startswith(self.prefix) and command:
+            segments = text[len(self.prefix) :].strip().split()
+            cmd_len = len(self.prefix) + len(command)
+        else:
+            segments = text.split() if text else []
+            cmd_len = len(segments[0]) if segments else 0
+
+        return Context(
+            bot=self,
+            message=message,
+            cmd_len=cmd_len,
+            segments=segments,
+            update=update,
+            ptb_context=None,
+        )
+
     async def dispatch_event(
         self: "Zyra", event: str, *args: Any, wait: bool = True, **kwargs: Any
     ) -> None:
@@ -141,17 +168,27 @@ class EventDispatcher(ZyraBase):
                 if update
                 else (args[0] if isinstance(args[0], Message) else None)
             )
+
             if message and message.text and message.text.startswith(self.prefix):
                 text = message.text[len(self.prefix) :].strip()
                 if text:
                     cmd = text.split()[0].lower()
                     if cmd in self.command_map:
                         listener = self.command_map[cmd]
-                        # Only pass the update object to commands
-                        tasks.add(self.loop.create_task(listener.func(update)))
-                        if wait:
-                            await asyncio.wait(tasks)
-                        return
+                        # Create context for command handlers
+                        try:
+                            ctx = self._create_context(
+                                update, cmd, len(self.prefix) + len(cmd)
+                            )
+                            tasks.add(self.loop.create_task(listener.func(ctx)))
+                            if wait:
+                                await asyncio.wait(tasks)
+                            return
+                        except Exception as e:
+                            self.log.error(
+                                f"Error creating context for command '{cmd}': {e}"
+                            )
+                            return
 
         for listener in listeners:
             if listener.commands and event == "message":
@@ -183,9 +220,24 @@ class EventDispatcher(ZyraBase):
                 if not matched:
                     continue
 
-            # For non-command events, pass only the first argument (update)
-            if args:
-                tasks.add(self.loop.create_task(listener.func(args[0])))
+            # For lifecycle events (load, start, etc.), pass the listener function directly
+            if event in {"load", "start", "started", "stop", "stopped"}:
+                if args:
+                    tasks.add(self.loop.create_task(listener.func(*args)))
+                else:
+                    tasks.add(self.loop.create_task(listener.func()))
+            # For other events, create context if it's an Update
+            elif args and isinstance(args[0], Update):
+                try:
+                    ctx = self._create_context(args[0])
+                    tasks.add(self.loop.create_task(listener.func(ctx)))
+                except Exception as e:
+                    self.log.error(f"Error creating context for event '{event}': {e}")
+                    # Fallback to passing the update directly
+                    tasks.add(self.loop.create_task(listener.func(args[0])))
+            else:
+                # For non-Update events, pass arguments as-is
+                tasks.add(self.loop.create_task(listener.func(*args)))
 
         if tasks and wait:
             await asyncio.wait(tasks)

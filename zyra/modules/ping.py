@@ -3,8 +3,6 @@
 import time as _time
 from typing import ClassVar
 
-from telegram import Update
-
 from .. import listener, module
 from ..util import time
 
@@ -15,16 +13,22 @@ class Ping(module.Module):
     @listener.on_commands("ping", "p")
     @listener.desc("Check if the bot is alive and measure latency")
     @listener.usage("ping - Test bot responsiveness")
-    async def handle_ping(self, update: Update) -> None:
-        msg = update.effective_message
-        if not msg:
-            return
-
+    async def handle_ping(self, ctx: listener.Context) -> None:
+        """Handle ping command with Context object."""
         start = _time.perf_counter()
-        sent = await msg.reply_text("...")
+        sent = await ctx.respond("🏓 Pinging...")
         end = _time.perf_counter()
 
         latency_us = int((end - start) * 1_000_000)
         latency_str = time.format_duration_us(latency_us)
 
-        await sent.edit_text(f"Pong! <b>{latency_str}</b>")
+        # Show some additional info using Context
+        response_lines = [
+            "🏓 <b>Pong!</b>",
+            f"⚡ Latency: <code>{latency_str}</code>",
+            f"👤 User: <code>{ctx.msg.from_user.first_name if ctx.msg.from_user else 'Unknown'}</code>",
+            f"💬 Chat: <code>{ctx.chat.title or ctx.chat.first_name or 'Private'}</code>",
+            f"📝 Command: <code>{ctx.invoker}</code>",
+        ]
+
+        await sent.edit_text("\n".join(response_lines))

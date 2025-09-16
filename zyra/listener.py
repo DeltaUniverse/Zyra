@@ -7,12 +7,62 @@ It also includes metadata decorators for priority, description, and usage, as
 well as the Listener class to encapsulate handler information.
 """
 
-from typing import Any, Callable, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional, Sequence
 
+from telegram import Message, Update
+from telegram.ext import CallbackContext
 from telegram.ext import filters as ptb_filters
+
+if TYPE_CHECKING:
+    from .core import Zyra
 
 ListenerFunc = Any
 Decorator = Callable[[ListenerFunc], ListenerFunc]
+
+
+class Context:
+    """Enhanced context object for command handling with additional utilities."""
+
+    def __init__(
+        self,
+        bot: "Zyra",
+        message: Message,
+        cmd_len: int,
+        *,
+        segments: Sequence[str],
+        update: Optional[Update] = None,
+        ptb_context: Optional[CallbackContext] = None,
+    ) -> None:
+        self.bot = bot
+        self.chat = message.chat
+        self.msg = message
+        self.message = message
+        self.reply_msg = message.reply_to_message
+        self.segments = segments
+        self.cmd_len = cmd_len
+        self.invoker = self.segments[0] if self.segments else ""
+        self.last_update_time = None
+        self.input = (self.msg.text or "")[self.cmd_len :]
+        self.update = update
+        self.ptb_context = ptb_context
+
+    @property
+    def args(self) -> Sequence[str]:
+        """Get command arguments."""
+        if (
+            self.ptb_context is not None
+            and getattr(self.ptb_context, "args", None) is not None
+        ):
+            return list(self.ptb_context.args)
+        return self.segments[1:]
+
+    async def respond(self, text: str, **kwargs) -> Message:
+        """Send a reply message to the current chat."""
+        return await self.msg.reply_text(text, **kwargs)
+
+    async def reply(self, text: str, **kwargs) -> Message:
+        """Alias for respond method."""
+        return await self.respond(text, **kwargs)
 
 
 def priority(_prio: int) -> Decorator:
