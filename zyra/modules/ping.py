@@ -4,7 +4,6 @@ import time as _time
 from typing import ClassVar
 
 from telegram import Update
-from telegram.ext import ContextTypes
 
 from .. import listener, module
 from ..util import time
@@ -16,9 +15,7 @@ class Ping(module.Module):
     @listener.on_commands("ping", "p")
     @listener.desc("Check if the bot is alive and measure latency")
     @listener.usage("ping - Test bot responsiveness")
-    async def handle_ping(
-        self, update: Update, context: ContextTypes.DEFAULT_TYPE
-    ) -> None:
+    async def handle_ping(self, update: Update) -> None:
         msg = update.effective_message
         if not msg:
             return

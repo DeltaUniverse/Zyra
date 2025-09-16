@@ -4,7 +4,7 @@ import inspect
 from typing import TYPE_CHECKING, Any, MutableMapping, MutableSequence, Optional
 
 from telegram import CallbackQuery, ChosenInlineResult, InlineQuery, Message, Update
-from telegram.ext import ContextTypes, filters
+from telegram.ext import filters
 
 from .. import module, util
 from ..listener import Listener, ListenerFunc
@@ -147,11 +147,8 @@ class EventDispatcher(ZyraBase):
                     cmd = text.split()[0].lower()
                     if cmd in self.command_map:
                         listener = self.command_map[cmd]
-                        if update and len(args) > 1:
-                            context: ContextTypes.DEFAULT_TYPE = args[1]  # type: ignore[assignment]
-                            context.user_data["_current_command"] = cmd
-                            context.user_data["_current_args"] = text.split()[1:]
-                        tasks.add(self.loop.create_task(listener.func(*args, **kwargs)))
+                        # Only pass the update object to commands
+                        tasks.add(self.loop.create_task(listener.func(update)))
                         if wait:
                             await asyncio.wait(tasks)
                         return
@@ -186,7 +183,9 @@ class EventDispatcher(ZyraBase):
                 if not matched:
                     continue
 
-            tasks.add(self.loop.create_task(listener.func(*args, **kwargs)))
+            # For non-command events, pass only the first argument (update)
+            if args:
+                tasks.add(self.loop.create_task(listener.func(args[0])))
 
         if tasks and wait:
             await asyncio.wait(tasks)
