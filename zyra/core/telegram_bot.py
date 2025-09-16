@@ -23,6 +23,7 @@ from telegram import (
     Update,
     User,
 )
+from telegram.constants import UpdateType
 from telegram.error import TelegramError
 from telegram.ext import (
     Application,
@@ -46,11 +47,11 @@ Handler = Union[
     CallbackQueryHandler, InlineQueryHandler, MessageHandler, ChosenInlineResultHandler
 ]
 Event = Union[CallbackQuery, InlineQuery, List[Message], Message, ChosenInlineResult]
-ALLOWED_EVENT: list[str] = [
-    "message",
-    "callback_query",
-    "inline_query",
-    "chosen_inline_result",
+EVENT_TYPES: list[UpdateType] = [
+    Update.MESSAGE,
+    Update.CALLBACK_QUERY,
+    Update.INLINE_QUERY,
+    Update.CHOSEN_INLINE_RESULT,
 ]
 
 
@@ -109,7 +110,7 @@ class TelegramBot(ZyraBase):
         self.update_module_events()
 
     async def _on_error(
-        self: "Zyra", update: object, context: ContextTypes.DEFAULT_TYPE
+        self: "Zyra", update: Update, context: ContextTypes.DEFAULT_TYPE
     ) -> None:
         """PTB error hook: log and forward exceptions to the owner."""
         self.log.error("Exception in handler", exc_info=context.error)
@@ -139,7 +140,7 @@ class TelegramBot(ZyraBase):
         await self.dispatch_event("load")
         await self.application.initialize()
         await self.application.start()
-        await self.application.updater.start_polling(allowed_updates=Update.ALL_TYPES)
+        await self.application.updater.start_polling(allowed_updates=EVENT_TYPES)
         self.loaded = True
         self.user = await self.application.bot.get_me()
         self.start_time_us = time.usec()
