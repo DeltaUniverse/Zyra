@@ -172,7 +172,7 @@ class EventDispatcher(ZyraBase):
         if listener:
             try:
                 ctx = self._create_context(update, command=cmd, _raw_ctx=raw_ctx)
-                return self.loop.create_task(listener.func(ctx))
+                await listener.func(ctx)
             except Exception as e:
                 self.log.error(f"Error creating context for command '{cmd}': {e}")
 
