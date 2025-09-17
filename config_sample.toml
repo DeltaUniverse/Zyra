@@ -1,5 +1,6 @@
 [telegram]
 token = "YOUR_BOT_TOKEN"
+base_url = ""
 
 [bot]
 prefix = "/"

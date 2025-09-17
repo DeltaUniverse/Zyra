@@ -88,7 +88,9 @@ class TelegramBot(ZyraBase):
     async def init_client(self: "Zyra") -> None:
         """Create Application, bot client, and baseline handlers."""
         token = self.config["telegram"]["token"]
-        self.application = (
+        base_url: str | None = self.config["telegram"].get("base_url")
+
+        builder = (
             ApplicationBuilder()
             .token(token)
             .defaults(
@@ -99,8 +101,16 @@ class TelegramBot(ZyraBase):
                     link_preview_options=LinkPreviewOptions(is_disabled=True),
                 )
             )
-            .build()
         )
+        if base_url:
+            builder.base_url(f"{base_url}/bot{{token}}")
+            builder.base_file_url(f"{base_url}/file/bot{{token}}")
+            builder.local_mode(True)
+            builder.http_version("1.1")
+            builder.get_updates_http_version("1.1")
+            self.log.info("Using local Bot API server: %s", base_url)
+
+        self.application = builder.build()
         self.client = self.application.bot
         self.prefix = self.config["bot"]["prefix"]
         self.owner_id = self.config["rank"]["owner_id"]
