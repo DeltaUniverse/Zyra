@@ -53,7 +53,14 @@ def setup_log(colorlog_enable: bool = False) -> None:
     root.addHandler(logfile)
 
     # Quieten noisy libraries
-    logging.getLogger("httpx").setLevel(logging.WARNING)
-    logging.getLogger("urllib3").setLevel(logging.WARNING)
-    logging.getLogger("telegram.ext.Application").setLevel(logging.WARNING)
-    logging.getLogger("telegram.ext._application").setLevel(logging.WARNING)
+    noisy_loggers = [
+        ("httpx", logging.ERROR),
+        ("httpcore", logging.ERROR),
+        ("urllib3", logging.WARNING),
+        ("telegram.ext.Application", logging.ERROR),
+        ("telegram.ext._application", logging.ERROR),
+        ("telegram.ext.Updater", logging.ERROR),
+        ("telegram.ext._utils.networkloop", logging.ERROR),
+    ]
+    for name, lvl in noisy_loggers:
+        logging.getLogger(name).setLevel(lvl)

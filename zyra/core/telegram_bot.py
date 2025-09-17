@@ -122,11 +122,16 @@ class TelegramBot(ZyraBase):
         self.load_all_modules()
         await self.dispatch_event("load")
         self.loaded = True
-        self.update_module_events()
 
         async with asyncio.Lock():
             await self.application.start()
-            await self.application.updater.start_polling(allowed_updates=EVENT_TYPES)
+            try:
+                await self.application.updater.start_polling(
+                    allowed_updates=EVENT_TYPES
+                )
+            except Exception as e:
+                self.log.error(str(e))
+
         self.user = await self.application.bot.get_me()
 
         self.start_time_us = time.usec()

@@ -1,146 +1,163 @@
-"""Exception formatting & PTB error handler utilities (Google-style docstrings).
-
-This module centralizes:
-  1) Plain-text traceback formatting (`format_exception`).
-  2) HTML-safe traceback formatting for Telegram (`format_exception_html`).
-  3) A factory that creates a PTB-compatible error handler
-     (`make_error_handler`) which logs and notifies the owner.
-"""
-
+import asyncio
 import html
-import os
+import time
 import traceback
-from typing import List, Optional, Protocol
+from typing import Callable, Optional
+
+from telegram.error import (
+    BadRequest,
+    Conflict,
+    Forbidden,
+    InvalidToken,
+    NetworkError,
+    RetryAfter,
+    TelegramError,
+    TimedOut,
+)
+from telegram.ext import ContextTypes
 
 
-class RedactFn(Protocol):
-    def __call__(self, text: str) -> str: ...
-
-
-def _relativize_filenames(
-    frames: List[traceback.FrameSummary], *, base: Optional[str] = None
-) -> None:
-    """Relativize filenames in traceback frames in-place.
-
-    Args:
-        frames: List of traceback frames to update.
-        base: Base directory to relativize against. Defaults to the
-            current working directory.
-    """
-    cwd = base or os.getcwd()
-    for f in frames:
-        if cwd and f.filename.startswith(cwd):
-            f.filename = os.path.relpath(f.filename, start=cwd)
-
-
-def format_exception(
-    exp: BaseException,
-    *,
-    tb: Optional[List[traceback.FrameSummary]] = None,
-    limit: Optional[int] = None,
-    make_relative: bool = True,
-    relative_to: Optional[str] = None,
-) -> str:
-    """Format an exception traceback as plain text.
+def format_exception_html(exc: BaseException, *, limit: Optional[int] = 8) -> str:
+    """Return an HTML-safe traceback for an exception.
 
     Args:
-        exp: The exception instance to format.
-        tb: Optional pre-extracted traceback frames. If None, uses
-            ``exp.__traceback__``.
-        limit: Maximum number of frames to include. Defaults to None
-            (include all).
-        make_relative: Whether to convert absolute filenames under the
-            working directory to relative paths.
-        relative_to: Custom base directory for relativizing. Defaults to
-            current working directory.
+        exc: The exception to format.
+        limit: Maximum traceback frames to include. If None, include all.
 
     Returns:
-        A string with the formatted traceback and error message.
+        A string containing a <pre>...</pre>-wrapped HTML-escaped traceback.
     """
-    if tb is None:
-        if exp.__traceback__ is not None:
-            tb = traceback.extract_tb(exp.__traceback__, limit=limit)
-        else:
-            tb = []
-
-    if make_relative:
-        _relativize_filenames(tb, base=relative_to)
-
-    stack = "".join(traceback.format_list(tb))
-    msg = str(exp)
-    suffix = f": {msg}" if msg else ""
-    return f"Traceback (most recent call last):\n{stack}{type(exp).__name__}{suffix}"
-
-
-def format_exception_html(
-    exp: BaseException,
-    *,
-    tb: Optional[List[traceback.FrameSummary]] = None,
-    limit: Optional[int] = None,
-    make_relative: bool = True,
-    relative_to: Optional[str] = None,
-) -> str:
-    """Format an exception traceback as HTML for Telegram.
-
-    Escapes the traceback text and wraps it in <pre>…</pre>.
-
-    Args:
-        exp: The exception instance to format.
-        tb: Optional pre-extracted traceback frames. If None, uses
-            ``exp.__traceback__``.
-        limit: Maximum number of frames to include.
-        make_relative: Whether to relativize file paths.
-        relative_to: Base directory for relativizing paths.
-
-    Returns:
-        A safe HTML string suitable for sending with ``ParseMode.HTML``.
-    """
-    plain = format_exception(
-        exp, tb=tb, limit=limit, make_relative=make_relative, relative_to=relative_to
+    tb = "".join(
+        traceback.format_exception(type(exc), exc, exc.__traceback__, limit=limit)
     )
-    return f"<pre>{html.escape(plain)}</pre>"
+    return f"<pre>{html.escape(tb)}</pre>"
 
 
 def make_error_handler(
-    owner_id: int, *, logger=None, redact: Optional[RedactFn] = None
+    owner_id: int,
+    *,
+    logger=None,
+    redact: Optional[Callable[[str], str]] = None,
+    notify_cooldown_s: int = 20,
 ):
-    """Create a PTB error handler coroutine that logs and notifies the owner.
+    """Create a PTB-compatible global error handler.
 
-    The returned coroutine matches PTB's error handler signature:
-    ``async def handler(update, context) -> None``.
-
-    Behavior:
-      * Logs the exception (uses provided `logger` if given, otherwise
-        `context.application.logger`).
-      * Builds an HTML-safe traceback with :func:`format_exception_html`.
-      * Optionally redacts sensitive data via `redact(text)`.
-      * Sends the error report to `owner_id`.
+    This handler classifies common PTB errors, logs appropriately, and
+    rate-limits owner notifications to avoid spam.
 
     Args:
-        owner_id: Telegram user ID to notify.
-        logger: Optional logger to use for logging exceptions.
-        redact: Optional function to sanitize the outgoing message.
+        owner_id: Telegram user ID to notify for important errors.
+        logger: Optional logger. If not provided, falls back to application's logger.
+        redact: Optional callable to sanitize sensitive strings before sending/logging.
+        notify_cooldown_s: Minimum seconds between owner notifications.
 
     Returns:
-        An async function usable with ``Application.add_error_handler(...)``.
+        An async function suitable for Application.add_error_handler().
     """
+    last_notify_ts = 0.0
+    redact = redact or (lambda s: s)
 
-    async def _handler(update, context) -> None:  # PTB signature
-        log = logger or getattr(context.application, "logger", None)
-        if log:
-            log.error("Exception in handler", exc_info=context.error)
+    async def _notify_owner(context: ContextTypes.DEFAULT_TYPE, text: str) -> None:
+        nonlocal last_notify_ts
+        now = time.monotonic()
+        if now - last_notify_ts < notify_cooldown_s:
+            return
 
+        last_notify_ts = now
         try:
-            html_text = format_exception_html(context.error)
-            if redact:
-                html_text = redact(html_text)
-
-            msg = f"⚠️ <b>Exception</b>:\n{html_text}"
             await context.bot.send_message(
-                chat_id=owner_id, text=msg, parse_mode="HTML"
+                owner_id, text, disable_web_page_preview=True
             )
-        except Exception as send_err:
+        except Exception as e:
+            if logger:
+                logger.debug("Failed to notify owner: %s", e)
+
+    async def _handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """PTB error handler.
+
+        Args:
+            update: The update that caused the error (may be None).
+            context: PTB context; context.error holds the exception.
+        """
+        exc = context.error  # type: ignore[attr-defined]
+        log = logger or getattr(getattr(context, "application", None), "logger", None)
+
+        if log:
+            log.error("Exception in handler", exc_info=exc)
+
+        # Transient / flow-control errors
+        if isinstance(exc, RetryAfter):
+            wait = max(1, int(getattr(exc, "retry_after", 1)))
             if log:
-                log.error("Failed to notify owner", exc_info=send_err)
+                log.warning("Flood control: retry after %ss", wait)
+
+            await asyncio.sleep(wait)
+            return
+
+        if isinstance(exc, TimedOut):
+            if log:
+                log.warning("Timed out (transient).")
+
+            return
+
+        if isinstance(exc, NetworkError):
+            if log:
+                log.warning("Network issue (transient): %s", exc)
+
+            return
+
+        # BadRequest classification
+        if isinstance(exc, BadRequest):
+            text = str(exc).lower()
+            benign = (
+                "message to delete not found" in text
+                or "message to edit not found" in text
+                or "message is not modified" in text
+                or "query is too old" in text
+                or "can't parse entities" in text
+            )
+            if benign:
+                if log:
+                    log.info("Benign BadRequest: %s", exc)
+
+                return
+
+            html_tb = redact(format_exception_html(exc))
+            await _notify_owner(
+                context,
+                "⚠️ <b>BadRequest</b>\n" f"{html.escape(str(exc))}\n\n" f"{html_tb}",
+            )
+            return
+
+        # Permissions/runner issues
+        if isinstance(exc, Forbidden):
+            if log:
+                log.info("Forbidden (insufficient rights / user blocked bot): %s", exc)
+
+            return
+
+        if isinstance(exc, Conflict):
+            await _notify_owner(
+                context,
+                "⚠️ <b>Conflict</b> — multiple runners? Ensure only one poller/webhook is active.\n"
+                f"{html.escape(str(exc))}",
+            )
+            return
+
+        if isinstance(exc, InvalidToken):
+            await _notify_owner(
+                context, "❌ <b>Invalid bot token</b>. Check TELEGRAM_TOKEN."
+            )
+            return
+
+        # Other TelegramError
+        if isinstance(exc, TelegramError):
+            html_tb = redact(format_exception_html(exc))
+            await _notify_owner(context, f"⚠️ <b>TelegramError</b>\n{html_tb}")
+            return
+
+        # Unknown exception
+        html_tb = redact(format_exception_html(exc))
+        await _notify_owner(context, f"⚠️ <b>Exception</b>\n{html_tb}")
 
     return _handler

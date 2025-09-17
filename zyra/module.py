@@ -44,7 +44,7 @@ class Module:
             bot: The main `Zyra` bot instance.
         """
         self.bot = bot
-        self.log = logging.getLogger(type(self).name)
+        self.log = logging.getLogger(type(self).name.lower().replace(" ", "_"))
         self.comment = None
 
     @classmethod

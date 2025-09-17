@@ -100,6 +100,9 @@ class Context:
         Returns:
             The `telegram.Message` object that was sent.
         """
+        if "do_quote" not in kwargs:
+            kwargs["do_quote"] = True
+
         return await self.msg.reply_text(text, **kwargs)
 
     async def reply(self, text: str, **kwargs) -> Message:
