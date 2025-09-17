@@ -78,7 +78,6 @@ class Zyra(TelegramBot, CommandDispatcher, EventDispatcher, ModuleExtender):
         Returns:
             The created and run `Zyra` instance.
         """
-        bot = None
 
         if loop:
             asyncio.set_event_loop(loop)
@@ -88,8 +87,6 @@ class Zyra(TelegramBot, CommandDispatcher, EventDispatcher, ModuleExtender):
             await bot.run()
         finally:
             asyncio.get_event_loop().stop()
-
-        return bot
 
     async def stop(self) -> None:
         """Gracefully stops the bot and all its components.
@@ -106,7 +103,6 @@ class Zyra(TelegramBot, CommandDispatcher, EventDispatcher, ModuleExtender):
         try:
             await self.application.stop()
             await self.application.updater.stop()
-            await self.application.shutdown()
         except Exception:
             pass
 

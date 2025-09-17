@@ -109,7 +109,7 @@ class TelegramBot(ZyraBase):
                 self.owner_id, logger=self.log, redact=self.redact_message
             )
         )
-        self.update_module_events()
+        await self.application.initialize()
 
     async def start(self: "Zyra") -> None:
         """Start polling and dispatch lifecycle events.
@@ -121,11 +121,14 @@ class TelegramBot(ZyraBase):
         await self.init_client()
         self.load_all_modules()
         await self.dispatch_event("load")
-        await self.application.initialize()
-        await self.application.start()
-        await self.application.updater.start_polling(allowed_updates=EVENT_TYPES)
         self.loaded = True
+        self.update_module_events()
+
+        async with asyncio.Lock():
+            await self.application.start()
+            await self.application.updater.start_polling(allowed_updates=EVENT_TYPES)
         self.user = await self.application.bot.get_me()
+
         self.start_time_us = time.usec()
         await self.dispatch_event("start", self.start_time_us)
         self.log.info("Bot is ready")

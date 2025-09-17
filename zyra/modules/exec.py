@@ -32,7 +32,7 @@ class Exec(module.Module):
             reply: Optional[Message] = ctx.msg.reply_to_message if ctx.msg else None
             code = (reply.text or reply.caption or "") if reply else ""
 
-        sent = await ctx.respond("<code>...</code>", parse_mode="HTML")
+        sent = await ctx.respond("!\<code>...</code>", parse_mode="HTML")
 
         if not code.strip():
             await sent.edit_text(
@@ -54,9 +54,7 @@ class Exec(module.Module):
             output, took_us, paste_button = "CancelledError", 0, None
 
         took_str = time.format_duration_us(took_us)
-        kb = self._buttons()
-        if paste_button:
-            kb.inline_keyboard[0].insert(0, paste_button)
+        kb = self._buttons(paste_button)
 
         text = f"<code>{html.escape(output)}</code>\n\n<b>{took_str}</b>"
         with contextlib.suppress(Exception):
@@ -122,15 +120,19 @@ class Exec(module.Module):
             task = asyncio.create_task(self._do_exec(host_msg, code, ctx))
             self._tasks[host_msg.id] = task
 
-    def _buttons(self) -> InlineKeyboardMarkup:
+    def _buttons(
+        self, paste_button: Optional[InlineKeyboardButton] = None
+    ) -> InlineKeyboardMarkup:
+        first_row = [
+            InlineKeyboardButton("Run", callback_data="exec:run"),
+            InlineKeyboardButton("Cancel", callback_data="exec:cancel"),
+        ]
+
+        if paste_button:
+            first_row.insert(0, paste_button)
+
         return InlineKeyboardMarkup(
-            [
-                [
-                    InlineKeyboardButton("Run", callback_data="exec:run"),
-                    InlineKeyboardButton("Cancel", callback_data="exec:cancel"),
-                ],
-                [InlineKeyboardButton("Del", callback_data="exec:del")],
-            ]
+            [first_row, [InlineKeyboardButton("Del", callback_data="exec:del")]]
         )
 
     async def _run_code(
@@ -153,14 +155,16 @@ class Exec(module.Module):
         paste_button: Optional[InlineKeyboardButton] = None
         if len(output) > 2048:
             try:
+
                 resp = await self.bot.http.post(
-                    "https://paste.rs", data=output.encode()
+                    "https://paste.rs", data=output.encode(), timeout=30.0
                 )
                 resp.raise_for_status()
+                paste_url = resp.text.strip()
             except Exception as e:
                 output = f"{output[:1024]}...\n\n{e.__class__.__name__}:\n  {e}"
             else:
-                paste_button = InlineKeyboardButton("Output", url=resp.text)
+                paste_button = InlineKeyboardButton("Output", url=paste_url)
                 output = f"{output[:1024]}..."
 
         return output, took_us, paste_button
