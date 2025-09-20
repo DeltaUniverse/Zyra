@@ -13,12 +13,15 @@ import httpx
 from telegram.ext import Application
 
 from .cmd_dispatcher import CommandDispatcher
+from .database import DatabaseProvider
 from .event_dispatcher import EventDispatcher
 from .module_extender import ModuleExtender
 from .telegram_bot import TelegramBot
 
 
-class Zyra(TelegramBot, CommandDispatcher, EventDispatcher, ModuleExtender):
+class Zyra(
+    TelegramBot, CommandDispatcher, DatabaseProvider, EventDispatcher, ModuleExtender
+):
     """The main bot class, integrating all core components.
 
     This class inherits functionality from various mixins to handle Telegram
@@ -42,6 +45,7 @@ class Zyra(TelegramBot, CommandDispatcher, EventDispatcher, ModuleExtender):
     log: logging.Logger
     loop: asyncio.AbstractEventLoop
     stopping: bool
+    db: DatabaseProvider
 
     def __init__(self, config: Mapping[str, Any]) -> None:
         """Initializes the Zyra bot.
@@ -106,6 +110,7 @@ class Zyra(TelegramBot, CommandDispatcher, EventDispatcher, ModuleExtender):
         except Exception:
             pass
 
+        await self.db.close()
         await self.http.aclose()
 
         self.log.info("Running post-stop hooks")
