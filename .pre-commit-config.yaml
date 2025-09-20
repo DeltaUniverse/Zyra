@@ -33,7 +33,6 @@ repos:
           - --remove-unused-variables
           - --in-place
 
-
   - repo: https://github.com/jsh9/blank-line-after-blocks
     rev: 0.1.4
     hooks:
@@ -43,6 +42,16 @@ repos:
     hooks:
       - id: poetry-export-requirements
         name: poetry export requirements.txt
-        entry: poetry export --without-hashes --format=requirements.txt -o requirements.txt
         language: system
         pass_filenames: false
+        files: ^(pyproject\.toml|poetry\.lock)$
+        entry: |
+          bash -c '
+            if command -v poetry >/dev/null 2>&1 && poetry export --help | grep -q requirements.txt; then
+              poetry export --without-hashes --format=requirements.txt -o requirements.txt || exit 0u
+              # git add requirements.txt || true
+            else
+              echo "[pre-commit] poetry export not available, skipping"
+              exit 0
+            fi
+          '
