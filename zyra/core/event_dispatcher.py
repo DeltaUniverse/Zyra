@@ -23,6 +23,9 @@ class LifecycleEvent(str, Enum):
     STOPPED = "stopped"
 
 
+_LIFECYCLE_VALUES = {e.value for e in LifecycleEvent}
+
+
 class EventDispatcher(ZyraBase):
     listeners: MutableMapping[str, MutableSequence[Listener]]
     command_map: MutableMapping[str, Listener]
@@ -44,7 +47,7 @@ class EventDispatcher(ZyraBase):
         description: Optional[str] = None,
         usage: Optional[str] = None,
     ) -> None:
-        if filters_object and event_name in LifecycleEvent.__members__.values():
+        if filters_object and event_name in _LIFECYCLE_VALUES:
             self.log.warning("Lifecycle events ignore filters.")
             filters_object = None
 
@@ -59,9 +62,9 @@ class EventDispatcher(ZyraBase):
             usage=usage,
         )
 
-        listener_list = self.listeners.setdefault(event_name, [])
-        listener_list.append(listener_item)
-        listener_list.sort()
+        bucket = self.listeners.setdefault(event_name, [])
+        bucket.append(listener_item)
+        bucket.sort()
 
         for command_name in commands:
             if command_name in self.command_map:
@@ -75,14 +78,14 @@ class EventDispatcher(ZyraBase):
         self.update_module_events()
 
     def unregister_listener(self: "Zyra", listener_item: Listener) -> None:
-        listener_list = self.listeners.get(listener_item.event)
-        if not listener_list:
+        bucket = self.listeners.get(listener_item.event)
+        if not bucket:
             return
 
         with contextlib.suppress(ValueError):
-            listener_list.remove(listener_item)
+            bucket.remove(listener_item)
 
-        if not listener_list:
+        if not bucket:
             self.listeners.pop(listener_item.event, None)
 
         for command_name in listener_item.commands:
@@ -92,42 +95,38 @@ class EventDispatcher(ZyraBase):
         self.update_module_events()
 
     def register_listeners(self: "Zyra", mod: module.Module) -> None:
-        for attribute_name, function in inspect.getmembers(
+        # Method-based listeners via attributes injected oleh dekorator sistem kamu
+        for attr_name, fn in inspect.getmembers(
             mod.__class__, predicate=inspect.isfunction
         ):
-            if hasattr(function, "_listener_event"):
+            if hasattr(fn, "_listener_event"):
                 self.register_listener(
                     mod=mod,
-                    event_name=getattr(function, "_listener_event"),
-                    function=getattr(mod, attribute_name),
-                    priority=getattr(function, "_listener_priority", 100),
-                    filters_object=getattr(function, "_listener_filters", None),
-                    commands=getattr(function, "_listener_commands", ()),
-                    description=getattr(function, "_listener_description", None),
-                    usage=getattr(function, "_listener_usage", None),
+                    event_name=getattr(fn, "_listener_event"),
+                    function=getattr(mod, attr_name),
+                    priority=getattr(fn, "_listener_priority", 100),
+                    filters_object=getattr(fn, "_listener_filters", None),
+                    commands=getattr(fn, "_listener_commands", ()),
+                    description=getattr(fn, "_listener_description", None),
+                    usage=getattr(fn, "_listener_usage", None),
                 )
 
+        # Lifecycle hooks on_{load,start,started,stop,stopped}
         for lifecycle in LifecycleEvent:
             method_name = f"on_{lifecycle.name.lower()}"
             if hasattr(mod, method_name) and callable(
-                bound_method := getattr(mod, method_name)
+                bound := getattr(mod, method_name)
             ):
                 self.register_listener(
-                    mod=mod,
-                    event_name=lifecycle.value,
-                    function=bound_method,
-                    priority=0,
+                    mod=mod, event_name=lifecycle.value, function=bound, priority=0
                 )
 
     def unregister_listeners(self: "Zyra", mod: module.Module) -> None:
-        listeners_to_remove = [
-            listener_item
-            for listener_group in self.listeners.values()
-            for listener_item in listener_group
-            if listener_item.module == mod
+        to_remove = [
+            li for group in self.listeners.values() for li in group if li.module == mod
         ]
-        for listener_item in listeners_to_remove:
-            self.unregister_listener(listener_item)
+        for li in to_remove:
+            self.unregister_listener(li)
 
     def _create_context(
         self: "Zyra",
@@ -136,13 +135,13 @@ class EventDispatcher(ZyraBase):
         command_name: str = "",
         raw_context: Optional[CallbackContext] = None,
     ) -> Context:
-        message = update.effective_message
-        if not message:
+        msg = update.effective_message
+        if not msg:
             raise ValueError("Cannot create context without effective message.")
 
-        text = message.text or message.caption or ""
+        text = msg.text or msg.caption or ""
         segments = text.split()
-        command_prefix_length = (
+        cmd_len = (
             len(self.prefix) + len(command_name)
             if command_name
             else (len(segments[0]) if segments else 0)
@@ -150,8 +149,8 @@ class EventDispatcher(ZyraBase):
 
         return Context(
             bot=self,
-            message=message,
-            cmd_len=command_prefix_length,
+            message=msg,
+            cmd_len=cmd_len,
             segments=segments,
             update=update,
             _raw_ctx=raw_context,
@@ -160,12 +159,12 @@ class EventDispatcher(ZyraBase):
     async def _dispatch_command(
         self: "Zyra", update: Update, raw_context: Optional[CallbackContext]
     ) -> bool:
-        message = update.effective_message
-        message_text = message.text if message else None
-        if not (message_text and message_text.startswith(self.prefix)):
+        msg = update.effective_message
+        text = msg.text if msg else None
+        if not (text and text.startswith(self.prefix)):
             return False
 
-        remainder = message_text[len(self.prefix) :].strip()
+        remainder = text[len(self.prefix) :].strip()
         if not remainder:
             return False
 
@@ -175,19 +174,19 @@ class EventDispatcher(ZyraBase):
             return False
 
         try:
-            context_obj = self._create_context(
+            ctx = self._create_context(
                 update, command_name=command_name, raw_context=raw_context
             )
-            await listener_item.func(context_obj)
+            await listener_item.func(ctx)
+            # record successful command
+            await self.log_stat(f"cmd:{command_name}", update, raw_context)
         except Exception as exc:
-            traceback_obj = exc.__traceback__
-            while traceback_obj and traceback_obj.tb_next:
-                traceback_obj = traceback_obj.tb_next
+            tb = exc.__traceback__
+            while tb and tb.tb_next:
+                tb = tb.tb_next
 
-            file_path = (
-                traceback_obj.tb_frame.f_code.co_filename if traceback_obj else "?"
-            )
-            line_no = traceback_obj.tb_lineno if traceback_obj else "?"
+            file_path = tb.tb_frame.f_code.co_filename if tb else "?"
+            line_no = tb.tb_lineno if tb else "?"
             self.log.error(f"{exc.__class__.__name__}: {exc} at {file_path}:{line_no}")
 
         return True
@@ -195,87 +194,104 @@ class EventDispatcher(ZyraBase):
     async def dispatch_event(
         self: "Zyra", event_name: str, *args: Any, **kwargs: Any
     ) -> None:
-        listener_group = self.listeners.get(event_name)
-        if not listener_group:
+        group = self.listeners.get(event_name)
+        if not group:
             return
 
+        # Fast path for message event: handle command, then log message stat
         if event_name == "message" and args and isinstance(args[0], Update):
-            update: Update = args[0]
-            raw_context: Optional[CallbackContext] = (
+            upd: Update = args[0]
+            raw_ctx: Optional[CallbackContext] = (
                 args[1]
                 if len(args) > 1 and isinstance(args[1], CallbackContext)
                 else None
             )
-            if await self._dispatch_command(update, raw_context):
+            if await self._dispatch_command(upd, raw_ctx):
                 return
+            # non-command message
+            await self.log_stat("msg", upd, raw_ctx)
 
-        for listener_item in listener_group:
-            if listener_item.commands and event_name == "message":
+        # stat_event is a raw payload: do not wrap as Context
+        if event_name == "stat_event":
+            for li in group:
+                try:
+                    await li.func(*args, **kwargs)
+                except Exception as exc:
+                    tb = exc.__traceback__
+                    while tb and tb.tb_next:
+                        tb = tb.tb_next
+
+                    file_path = tb.tb_frame.f_code.co_filename if tb else "?"
+                    line_no = tb.tb_lineno if tb else "?"
+                    self.log.error(
+                        f"{exc.__class__.__name__}: {exc} at {file_path}:{line_no}"
+                    )
+
+            return
+
+        # General path
+        for li in group:
+            # skip command-bound listeners on bare "message" loop
+            if li.commands and event_name == "message":
                 continue
 
-            if listener_item.filters and args and isinstance(args[0], Update):
-                update_for_filter: Update = args[0]
+            # optional filters on Update
+            if li.filters and args and isinstance(args[0], Update):
+                upd_for_filter: Update = args[0]
                 try:
-                    filter_passed: bool = True
-                    filter_obj = listener_item.filters
-                    if hasattr(filter_obj, "check_update"):
-                        # Some PTB filter implementations expose async check_update
-                        maybe_result = filter_obj.check_update(update_for_filter)  # type: ignore[attr-defined]
-                        if asyncio.iscoroutine(maybe_result):
-                            filter_passed = await maybe_result  # type: ignore[assignment]
-                        else:
-                            filter_passed = bool(maybe_result)
-                    elif callable(filter_obj):
-                        filter_passed = bool(filter_obj(update_for_filter))  # type: ignore[misc]
-                    else:
-                        filter_passed = True
+                    passed = True
+                    flt = li.filters
+                    if hasattr(flt, "check_update"):
+                        maybe = flt.check_update(upd_for_filter)  # type: ignore[attr-defined]
+                        passed = (
+                            await maybe if asyncio.iscoroutine(maybe) else bool(maybe)
+                        )
+                    elif callable(flt):
+                        passed = bool(flt(upd_for_filter))  # type: ignore[misc]
 
-                    if not filter_passed:
+                    if not passed:
                         continue
                 except Exception as exc:
-                    traceback_obj = exc.__traceback__
-                    while traceback_obj and traceback_obj.tb_next:
-                        traceback_obj = traceback_obj.tb_next
+                    tb = exc.__traceback__
+                    while tb and tb.tb_next:
+                        tb = tb.tb_next
 
-                    file_path = (
-                        traceback_obj.tb_frame.f_code.co_filename
-                        if traceback_obj
-                        else "?"
-                    )
-                    line_no = traceback_obj.tb_lineno if traceback_obj else "?"
+                    file_path = tb.tb_frame.f_code.co_filename if tb else "?"
+                    line_no = tb.tb_lineno if tb else "?"
                     self.log.error(
                         f"{exc.__class__.__name__}: {exc} at {file_path}:{line_no}"
                     )
                     continue
 
             try:
-                if event_name in LifecycleEvent.__members__.values():
-                    await listener_item.func(*args, **kwargs)
+                if event_name in _LIFECYCLE_VALUES:
+                    await li.func(*args, **kwargs)
                 elif args and isinstance(args[0], Update):
-                    update_for_context: Update = args[0]
-                    raw_context: Optional[CallbackContext] = (
+                    upd_for_ctx: Update = args[0]
+                    raw_ctx: Optional[CallbackContext] = (
                         args[1]
                         if len(args) > 1 and isinstance(args[1], CallbackContext)
                         else None
                     )
-                    context_obj = self._create_context(
-                        update_for_context, raw_context=raw_context
-                    )
-                    await listener_item.func(context_obj)
+                    ctx = self._create_context(upd_for_ctx, raw_context=raw_ctx)
+                    await li.func(ctx)
                 else:
-                    await listener_item.func(*args, **kwargs)
+                    await li.func(*args, **kwargs)
             except Exception as exc:
-                traceback_obj = exc.__traceback__
-                while traceback_obj and traceback_obj.tb_next:
-                    traceback_obj = traceback_obj.tb_next
+                tb = exc.__traceback__
+                while tb and tb.tb_next:
+                    tb = tb.tb_next
 
-                file_path = (
-                    traceback_obj.tb_frame.f_code.co_filename if traceback_obj else "?"
-                )
-                line_no = traceback_obj.tb_lineno if traceback_obj else "?"
+                file_path = tb.tb_frame.f_code.co_filename if tb else "?"
+                line_no = tb.tb_lineno if tb else "?"
                 self.log.error(
                     f"{exc.__class__.__name__}: {exc} at {file_path}:{line_no}"
                 )
 
-    async def log_stat(self: "Zyra", stat_key: str) -> None:
-        await self.dispatch_event("stat_event", stat_key)
+    async def log_stat(
+        self: "Zyra",
+        stat_key: str,
+        update: Optional[Update] = None,
+        raw_context: Optional[CallbackContext] = None,
+    ) -> None:
+        await self.dispatch_event("stat_event", stat_key, update, raw_context)
