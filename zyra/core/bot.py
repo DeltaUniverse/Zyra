@@ -88,6 +88,8 @@ class Zyra(
 
         try:
             bot = cls(config)
+            # Initialize database before running
+            await bot.setup_database()
             await bot.run()
         finally:
             asyncio.get_event_loop().stop()
@@ -110,7 +112,8 @@ class Zyra(
         except Exception:
             pass
 
-        await self.db.close()
+        # Use the new close_database method
+        await self.close_database()
         await self.http.aclose()
 
         self.log.info("Running post-stop hooks")

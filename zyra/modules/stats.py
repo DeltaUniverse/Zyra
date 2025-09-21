@@ -4,7 +4,6 @@ from telegram import Chat, Update, User
 from telegram.ext import CallbackContext
 
 from .. import module
-from ..core.database import DatabaseError
 
 
 class Stats(module.Module):
@@ -55,7 +54,7 @@ class Stats(module.Module):
             await self.bot.db.execute(q1)
             await self.bot.db.execute(q2)
             await self.bot.db.execute(q3)
-        except DatabaseError as e:
+        except Exception as e:
             self.log.error(f"Stats migration failed: {e}")
 
     async def _bump_user(self, user: Optional[User], *, is_command: bool) -> None:
@@ -72,7 +71,7 @@ class Stats(module.Module):
                   last_seen = CURRENT_TIMESTAMP;
             """
             await self.bot.db.execute(q, user.id)
-        except DatabaseError as e:
+        except Exception as e:
             self.log.error(f"user_stats bump failed for {user.id}: {e}")
 
     async def _bump_chat(self, chat: Optional[Chat], *, is_command: bool) -> None:
@@ -89,7 +88,7 @@ class Stats(module.Module):
                   last_activity = CURRENT_TIMESTAMP;
             """
             await self.bot.db.execute(q, chat.id)
-        except DatabaseError as e:
+        except Exception as e:
             self.log.error(f"chat_stats bump failed for {chat.id}: {e}")
 
     async def _bump_command(self, cmd: str) -> None:
@@ -105,7 +104,7 @@ class Stats(module.Module):
                   last_used = CURRENT_TIMESTAMP;
             """
             await self.bot.db.execute(q, cmd)
-        except DatabaseError as e:
+        except Exception as e:
             self.log.error(f"command bump failed for /{cmd}: {e}")
 
     async def on_stat_event(
@@ -174,6 +173,6 @@ class Stats(module.Module):
                 lines.append("No commands yet.")
 
             await ctx.respond("\n".join(lines), parse_mode="HTML")
-        except DatabaseError as e:
+        except Exception as e:
             await ctx.respond(f"❌ Database error: {e}")
             self.log.error(f"stats summary failed: {e}")
