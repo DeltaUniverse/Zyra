@@ -173,8 +173,15 @@ class TelegramBot(ZyraBase):
         finally:
             await self.stop()
 
-    def _bind_event(self: "Zyra", name: str, handler: Handler, group: int = 0) -> None:
-        if name in self.listeners:
+    def _bind_event(
+        self: "Zyra",
+        name: str,
+        handler: Handler,
+        group: int = 0,
+        *,
+        force: bool = False,
+    ) -> None:
+        if force or name in self.listeners:
             if name not in self._handlers:
                 self.application.add_handler(handler, group=group)
                 self._handlers[name] = (handler, group)
@@ -183,6 +190,7 @@ class TelegramBot(ZyraBase):
             self.application.remove_handler(h, group=g)
 
     def update_module_events(self: "Zyra") -> None:
+        # Message events
         msg_filter = (
             filters.ALL
             & ~filters.StatusUpdate.NEW_CHAT_MEMBERS
@@ -190,8 +198,13 @@ class TelegramBot(ZyraBase):
             & ~filters.StatusUpdate.MIGRATE
         )
         self._bind_event(
-            "message", MessageHandler(msg_filter, self._evt_message), group=0
+            "message",
+            MessageHandler(msg_filter, self._evt_message),
+            group=0,
+            force=True,
         )
+
+        # Chat actions (status updates)
         chat_action_filter = (
             filters.StatusUpdate.NEW_CHAT_MEMBERS
             | filters.StatusUpdate.LEFT_CHAT_MEMBER
@@ -201,13 +214,28 @@ class TelegramBot(ZyraBase):
             "chat_action",
             MessageHandler(chat_action_filter, self._evt_message),
             group=1,
+            force=True,
         )
+
+        # Callback queries
         self._bind_event(
-            "callback_query", CallbackQueryHandler(self._evt_callback), group=0
+            "callback_query",
+            CallbackQueryHandler(self._evt_callback),
+            group=0,
+            force=True,
         )
-        self._bind_event("inline_query", InlineQueryHandler(self._evt_inline), group=0)
+
+        # Inline queries
         self._bind_event(
-            "chosen_inline_result", ChosenInlineResultHandler(self._evt_chosen), group=0
+            "inline_query", InlineQueryHandler(self._evt_inline), group=0, force=True
+        )
+
+        # Chosen inline result
+        self._bind_event(
+            "chosen_inline_result",
+            ChosenInlineResultHandler(self._evt_chosen),
+            group=0,
+            force=True,
         )
 
     async def _evt_message(

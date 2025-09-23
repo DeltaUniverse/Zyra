@@ -7,11 +7,12 @@ import html
 import inspect
 import io
 import os
-from typing import Any, ClassVar, Dict, Optional
+from typing import Any, ClassVar, Dict
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Message
+from telegram import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
-from .. import listener, module
+from .. import module
+from ..listener import Context
 from ..util import time
 
 
@@ -21,16 +22,20 @@ class Exec(module.Module):
 
     async def on_load(self) -> None:
         self._tasks = {}
+        self.log.info("Working")
 
-    @listener.on_commands("exec", "e")
-    async def exec_command(self, ctx: listener.Context) -> None:
+    async def on_command(self, ctx: Context) -> None:
+        if ctx.invoker not in {"exec", "e"}:
+            return
+
         if not ctx.msg or ctx.msg.from_user.id != self.bot.owner_id:
             return
 
-        code = (ctx.msg.text or "").partition(" ")[2]
-        if not code:
-            reply: Optional[Message] = ctx.msg.reply_to_message
-            code = reply.text or reply.caption or "" if reply else ""
+        code = (ctx.input or "").strip()
+        if not code and ctx.msg.reply_to_message:
+            code = (
+                ctx.msg.reply_to_message.text or ctx.msg.reply_to_message.caption or ""
+            ).strip()
 
         sent = await ctx.respond(
             "<code>...</code>",
@@ -38,7 +43,8 @@ class Exec(module.Module):
             parse_mode="HTML",
             allow_sending_without_reply=True,
         )
-        if not (code or "").strip():
+
+        if not code:
             with contextlib.suppress(Exception):
                 await sent.edit_text(
                     "<code>No Code Provided!</code>", parse_mode="HTML"
@@ -46,14 +52,106 @@ class Exec(module.Module):
 
             return
 
-        task = asyncio.create_task(self._do_exec(sent, code, ctx))
+        task = asyncio.create_task(self._do_exec(sent, code, {"ctx": ctx}))
         self._tasks[sent.id] = task
 
-    async def _do_exec(self, sent: Message, code: str, ctx: listener.Context) -> None:
+    async def on_callback_query(self, query: CallbackQuery) -> None:
+        if not query.data or not str(query.data).startswith("exec:"):
+            return
+
+        if query.from_user.id != self.bot.owner_id:
+            await query.answer("Who are you?", show_alert=True)
+            return
+
+        await query.answer()
+        host_msg = query.message
+        if not host_msg:
+            return
+
+        data = query.data
+
+        if data == "exec:del":
+            replied = host_msg.reply_to_message
+            if replied:
+                with contextlib.suppress(Exception):
+                    await replied.delete()
+
+            with contextlib.suppress(Exception):
+                await host_msg.delete()
+
+            task = self._tasks.pop(host_msg.id, None)
+            if task and not task.done():
+                task.cancel()
+
+            return
+
+        if data == "exec:cancel":
+            task = self._tasks.pop(host_msg.id, None)
+            if task and not task.done():
+                task.cancel()
+
+            with contextlib.suppress(Exception):
+                await host_msg.edit_text(
+                    "<b>Cancelling…</b>",
+                    reply_markup=self._buttons(running=False),
+                    parse_mode="HTML",
+                )
+
+            return
+
+        if data == "exec:run":
+            code = ""
+            if host_msg.reply_to_message:
+                raw = (
+                    host_msg.reply_to_message.text
+                    or host_msg.reply_to_message.caption
+                    or ""
+                )
+                if raw.startswith(("/exec", ".exec", "/e", ".e")):
+                    code = raw.partition(" ")[2]
+                else:
+                    code = raw
+
+            code = (code or "").strip()
+            if not code:
+                with contextlib.suppress(Exception):
+                    await host_msg.edit_text(
+                        "<code>Message Gone!</code>",
+                        reply_markup=self._buttons(running=False),
+                        parse_mode="HTML",
+                    )
+
+                return
+
+            with contextlib.suppress(Exception):
+                await host_msg.edit_text(
+                    "<code>...</code>",
+                    reply_markup=self._buttons(running=True),
+                    parse_mode="HTML",
+                )
+
+            task = asyncio.create_task(self._do_exec(host_msg, code, {}))
+            self._tasks[host_msg.id] = task
+            return
+
+    # ---------------- internal helpers ----------------
+
+    def _buttons(self, *, running: bool) -> InlineKeyboardMarkup:
+        row = [InlineKeyboardButton("Run", callback_data="exec:run")]
+        if running:
+            row.append(InlineKeyboardButton("Cancel", callback_data="exec:cancel"))
+
+        return InlineKeyboardMarkup(
+            [row, [InlineKeyboardButton("Del", callback_data="exec:del")]]
+        )
+
+    async def _do_exec(
+        self, sent: Message, code: str, extra_args: Dict[str, Any]
+    ) -> None:
         start_us = time.usec()
         try:
             output = await self._run_code(
-                code, {"ctx": ctx, "bot": ctx.bot, "time": time}
+                code, {"bot": self.bot, "time": time, **extra_args}
             )
             took_us = time.usec() - start_us
             text = f"<code>{html.escape(output)}</code>\n\n{time.format_duration_us(took_us)}"
@@ -72,98 +170,6 @@ class Exec(module.Module):
         finally:
             self._tasks.pop(getattr(sent, "id", None), None)
 
-    @listener.on_callback_query()
-    async def handle_callback(self, ctx: listener.Context) -> None:
-        query = getattr(ctx.update, "callback_query", None)
-        if not query or not query.data:
-            return
-
-        if not query.data.startswith("exec:"):
-            return
-
-        if query.from_user.id != self.bot.owner_id:
-            await query.answer("Who are you?", show_alert=True)
-            return
-
-        await query.answer()
-        host_msg = query.message
-        if not host_msg:
-            return
-
-        data = query.data
-        if data == "exec:del":
-            replied = host_msg.reply_to_message
-            if replied:
-                with contextlib.suppress(Exception):
-                    await replied.delete()
-
-            with contextlib.suppress(Exception):
-                await host_msg.delete()
-
-            task = self._tasks.pop(host_msg.id, None)
-            if task and (not task.done()):
-                task.cancel()
-
-            return
-
-        if data == "exec:cancel":
-            task = self._tasks.pop(host_msg.id, None)
-            if task and (not task.done()):
-                task.cancel()
-
-            with contextlib.suppress(Exception):
-                await host_msg.edit_text(
-                    "<b>Cancelling…</b>",
-                    reply_markup=self._buttons(running=False),
-                    parse_mode="HTML",
-                )
-
-            return
-
-        if data == "exec:run":
-            code = ""
-            replied = host_msg.reply_to_message
-            if replied:
-                code = replied.text or replied.caption or ""
-                if code.startswith(("/exec", ".exec", "/e", ".e")):
-                    code = code.partition(" ")[2]
-
-            if not code and host_msg.text:
-                rt = host_msg.reply_to_message
-                if rt and (rt.text or rt.caption):
-                    raw = rt.text or rt.caption
-                    code = raw.partition(" ")[2] if raw else ""
-
-            if not (code or "").strip():
-                with contextlib.suppress(Exception):
-                    await host_msg.edit_text(
-                        "<code>Message Gone!</code>",
-                        reply_markup=self._buttons(running=False),
-                        parse_mode="HTML",
-                    )
-
-                return
-
-            with contextlib.suppress(Exception):
-                await host_msg.edit_text(
-                    "<code>...</code>",
-                    reply_markup=self._buttons(running=True),
-                    parse_mode="HTML",
-                )
-
-            task = asyncio.create_task(self._do_exec(host_msg, code, ctx))
-            self._tasks[host_msg.id] = task
-            return
-
-    def _buttons(self, *, running: bool) -> InlineKeyboardMarkup:
-        row = [InlineKeyboardButton("Run", callback_data="exec:run")]
-        if running:
-            row.append(InlineKeyboardButton("Cancel", callback_data="exec:cancel"))
-
-        return InlineKeyboardMarkup(
-            [row, [InlineKeyboardButton("Del", callback_data="exec:del")]]
-        )
-
     async def _run_code(self, code: str, extra_args: Dict[str, Any]) -> str:
         args: Dict[str, Any] = {
             "self": self,
@@ -177,6 +183,7 @@ class Exec(module.Module):
         }
         args.update(extra_args)
         args = dict(sorted(args.items()))
+
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             try:

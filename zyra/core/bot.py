@@ -5,16 +5,13 @@ from typing import Any, Mapping, Optional
 import httpx
 from telegram.ext import Application
 
-from .cmd_dispatcher import CommandDispatcher
 from .database import DatabaseProvider
 from .event_dispatcher import EventDispatcher
 from .module_extender import ModuleExtender
 from .telegram_bot import TelegramBot
 
 
-class Zyra(
-    TelegramBot, CommandDispatcher, DatabaseProvider, EventDispatcher, ModuleExtender
-):
+class Zyra(TelegramBot, DatabaseProvider, EventDispatcher, ModuleExtender):
     config: Mapping[str, Any]
     application: Application
     http: httpx.AsyncClient
