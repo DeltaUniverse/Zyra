@@ -1,10 +1,3 @@
-"""Telegram Bot Interface.
-
-This module acts as a bridge to the `python-telegram-bot` library. It handles
-the low-level details of setting up the client, managing handlers for different
-Telegram update types, and forwarding events to the `EventDispatcher`.
-"""
-
 import asyncio
 import datetime
 import signal
@@ -54,21 +47,6 @@ EVENT_TYPES: list[UpdateType] = [
 
 
 class TelegramBot(ZyraBase):
-    """Telegram bot bridge using python-telegram-bot v22.
-
-    This class encapsulates the `python-telegram-bot` Application and handles
-    the bot's lifecycle, including initialization, startup, graceful shutdown,
-    and the main polling loop.
-
-    Attributes:
-        application (Application): The main PTB Application instance.
-        client (Bot): The PTB Bot instance for direct API calls.
-        owner_id (int): The Telegram user ID of the bot owner.
-        prefix (str): The command prefix (e.g., '!').
-        user (User): The `User` object for the bot itself.
-        start_time_us (int): The Unix timestamp (in microseconds) when the bot started.
-    """
-
     application: Application
     client: Bot
     owner_id: int
@@ -79,17 +57,14 @@ class TelegramBot(ZyraBase):
     __idle__: asyncio.Task[None]
 
     def __init__(self: "Zyra", **kwargs: Any) -> None:
-        """Initialize with app state and config bindings."""
         self.loaded = False
         self._handlers = {}
-        self.__idle__ = None  # type: ignore
+        self.__idle__ = None
         super().__init__(**kwargs)
 
     async def init_client(self: "Zyra") -> None:
-        """Create Application, bot client, and baseline handlers."""
         token = self.config["telegram"]["token"]
         base_url: str | None = self.config["telegram"].get("base_url")
-
         builder = (
             ApplicationBuilder()
             .token(token)
@@ -122,17 +97,11 @@ class TelegramBot(ZyraBase):
         await self.application.initialize()
 
     async def start(self: "Zyra") -> None:
-        """Start polling and dispatch lifecycle events.
-
-        Initializes the client, loads all modules, dispatches 'load' and 'start'
-        events, and begins polling for Telegram updates.
-        """
         self.log.info("Starting")
         await self.init_client()
         self.load_all_modules()
         await self.dispatch_event("load")
         self.loaded = True
-
         async with asyncio.Lock():
             await self.application.start()
             try:
@@ -143,29 +112,19 @@ class TelegramBot(ZyraBase):
                 self.log.error(str(e))
 
         self.user = await self.application.bot.get_me()
-
         self.start_time_us = time.usec()
         await self.dispatch_event("start", self.start_time_us)
         self.log.info("Bot is ready")
         await self.dispatch_event("started")
 
     async def idle(self: "Zyra") -> None:
-        """Sleep-loop until a termination signal is received.
-
-        This method sets up signal handlers for graceful shutdown (SIGINT, SIGTERM)
-        and then enters an indefinite sleep loop. The loop is broken when a
-        shutdown signal is caught.
-
-        Raises:
-            RuntimeError: If the bot is already running an idle loop.
-        """
         if self.__idle__:
             raise RuntimeError("This bot instance is already running")
 
         signal_names: dict[Any, str] = {
             k: v
             for v, k in signal.__dict__.items()
-            if v.startswith("SIG") and not v.startswith("SIG_")
+            if v.startswith("SIG") and (not v.startswith("SIG_"))
         }
 
         def clear_handler() -> None:
@@ -197,15 +156,6 @@ class TelegramBot(ZyraBase):
                 break
 
     async def run(self: "Zyra") -> None:
-        """Run the bot until it's stopped.
-
-        This is the main execution method. It calls `start()` to initialize and
-        begin polling, then `idle()` to wait for a shutdown signal, and finally
-        `stop()` for cleanup.
-
-        Raises:
-            RuntimeError: If the bot instance is already running.
-        """
         if self.__idle__:
             raise RuntimeError("This bot instance is already running")
 
@@ -224,17 +174,6 @@ class TelegramBot(ZyraBase):
             await self.stop()
 
     def _bind_event(self: "Zyra", name: str, handler: Handler, group: int = 0) -> None:
-        """Bind or unbind a PTB handler based on active listeners.
-
-        This method dynamically adds or removes handlers from the PTB
-        Application. A handler is added only if there is at least one
-        active listener for its corresponding event.
-
-        Args:
-            name: The name of the event (e.g., 'message').
-            handler: The PTB handler object.
-            group: The handler group for ordering.
-        """
         if name in self.listeners:
             if name not in self._handlers:
                 self.application.add_handler(handler, group=group)
@@ -244,12 +183,6 @@ class TelegramBot(ZyraBase):
             self.application.remove_handler(h, group=g)
 
     def update_module_events(self: "Zyra") -> None:
-        """Register or deregister PTB handlers according to active listener sets.
-
-        This method is called whenever listeners are added or removed. It ensures
-        that the underlying `python-telegram-bot` handlers are synchronized with
-        the state of the bot's internal listener registry.
-        """
         msg_filter = (
             filters.ALL
             & ~filters.StatusUpdate.NEW_CHAT_MEMBERS
@@ -259,7 +192,6 @@ class TelegramBot(ZyraBase):
         self._bind_event(
             "message", MessageHandler(msg_filter, self._evt_message), group=0
         )
-
         chat_action_filter = (
             filters.StatusUpdate.NEW_CHAT_MEMBERS
             | filters.StatusUpdate.LEFT_CHAT_MEMBER
@@ -270,7 +202,6 @@ class TelegramBot(ZyraBase):
             MessageHandler(chat_action_filter, self._evt_message),
             group=1,
         )
-
         self._bind_event(
             "callback_query", CallbackQueryHandler(self._evt_callback), group=0
         )
@@ -282,48 +213,32 @@ class TelegramBot(ZyraBase):
     async def _evt_message(
         self: "Zyra", update: Update, context: ContextTypes.DEFAULT_TYPE
     ) -> None:
-        """Handler for forwarding message updates to the EventDispatcher."""
         if update.effective_message:
             await self.dispatch_event("message", update, context)
 
     async def _evt_callback(
         self: "Zyra", update: Update, context: ContextTypes.DEFAULT_TYPE
     ) -> None:
-        """Handler for forwarding callback_query updates to the EventDispatcher."""
         if update.callback_query:
             await self.dispatch_event("callback_query", update, context)
 
     async def _evt_inline(
         self: "Zyra", update: Update, context: ContextTypes.DEFAULT_TYPE
     ) -> None:
-        """Handler for forwarding inline_query updates to the EventDispatcher."""
         if update.inline_query:
             await self.dispatch_event("inline_query", update, context)
 
     async def _evt_chosen(
         self: "Zyra", update: Update, context: ContextTypes.DEFAULT_TYPE
     ) -> None:
-        """Handler for forwarding chosen_inline_result updates to the EventDispatcher."""
         if update.chosen_inline_result:
             await self.dispatch_event("chosen_inline_result", update, context)
 
     @property
     def events_activated(self: "Zyra") -> int:
-        """Returns the number of active PTB handlers."""
         return len(self._handlers)
 
     def redact_message(self: "Zyra", text: str) -> str:
-        """Redacts sensitive tokens from a string.
-
-        This is a utility function to prevent logging sensitive information,
-        such as the bot's API token.
-
-        Args:
-            text: The input string to sanitize.
-
-        Returns:
-            The sanitized string with sensitive tokens replaced.
-        """
         redacted = "[REDACTED]"
         bot_token = self.config["telegram"].get("token")
         if bot_token and bot_token in text:

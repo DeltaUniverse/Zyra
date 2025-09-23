@@ -61,11 +61,9 @@ class EventDispatcher(ZyraBase):
             description=description,
             usage=usage,
         )
-
         bucket = self.listeners.setdefault(event_name, [])
         bucket.append(listener_item)
         bucket.sort()
-
         for command_name in commands:
             if command_name in self.command_map:
                 other = self.command_map[command_name]
@@ -95,7 +93,6 @@ class EventDispatcher(ZyraBase):
         self.update_module_events()
 
     def register_listeners(self: "Zyra", mod: module.Module) -> None:
-        # Method-based listeners via attributes injected oleh dekorator sistem kamu
         for attr_name, fn in inspect.getmembers(
             mod.__class__, predicate=inspect.isfunction
         ):
@@ -111,11 +108,10 @@ class EventDispatcher(ZyraBase):
                     usage=getattr(fn, "_listener_usage", None),
                 )
 
-        # Lifecycle hooks on_{load,start,started,stop,stopped}
         for lifecycle in LifecycleEvent:
             method_name = f"on_{lifecycle.name.lower()}"
             if hasattr(mod, method_name) and callable(
-                bound := getattr(mod, method_name)
+                (bound := getattr(mod, method_name))
             ):
                 self.register_listener(
                     mod=mod, event_name=lifecycle.value, function=bound, priority=0
@@ -144,9 +140,8 @@ class EventDispatcher(ZyraBase):
         cmd_len = (
             len(self.prefix) + len(command_name)
             if command_name
-            else (len(segments[0]) if segments else 0)
+            else len(segments[0]) if segments else 0
         )
-
         return Context(
             bot=self,
             message=msg,
@@ -178,7 +173,6 @@ class EventDispatcher(ZyraBase):
                 update, command_name=command_name, raw_context=raw_context
             )
             await listener_item.func(ctx)
-            # record successful command
             await self.log_stat(f"cmd:{command_name}", update, raw_context)
         except Exception as exc:
             tb = exc.__traceback__
@@ -198,7 +192,6 @@ class EventDispatcher(ZyraBase):
         if not group:
             return
 
-        # Fast path for message event: handle command, then log message stat
         if event_name == "message" and args and isinstance(args[0], Update):
             upd: Update = args[0]
             raw_ctx: Optional[CallbackContext] = (
@@ -208,10 +201,9 @@ class EventDispatcher(ZyraBase):
             )
             if await self._dispatch_command(upd, raw_ctx):
                 return
-            # non-command message
+
             await self.log_stat("msg", upd, raw_ctx)
 
-        # stat_event is a raw payload: do not wrap as Context
         if event_name == "stat_event":
             for li in group:
                 try:
@@ -229,25 +221,22 @@ class EventDispatcher(ZyraBase):
 
             return
 
-        # General path
         for li in group:
-            # skip command-bound listeners on bare "message" loop
             if li.commands and event_name == "message":
                 continue
 
-            # optional filters on Update
             if li.filters and args and isinstance(args[0], Update):
                 upd_for_filter: Update = args[0]
                 try:
                     passed = True
                     flt = li.filters
                     if hasattr(flt, "check_update"):
-                        maybe = flt.check_update(upd_for_filter)  # type: ignore[attr-defined]
+                        maybe = flt.check_update(upd_for_filter)
                         passed = (
                             await maybe if asyncio.iscoroutine(maybe) else bool(maybe)
                         )
                     elif callable(flt):
-                        passed = bool(flt(upd_for_filter))  # type: ignore[misc]
+                        passed = bool(flt(upd_for_filter))
 
                     if not passed:
                         continue

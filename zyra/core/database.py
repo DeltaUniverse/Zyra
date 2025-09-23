@@ -18,14 +18,11 @@ class DatabaseProvider(ZyraBase):
         if not dsn:
             raise SystemExit("Missing database.db_uri in config")
 
-        # Store the DSN for later initialization
         self._db_dsn = dsn
-        self.db = None  # Will be initialized in setup_database()
-
+        self.db = None
         super().__init__(**kwargs)
 
     async def setup_database(self: "Zyra") -> None:
-        """Initialize the database pool."""
         if self.db is None:
             self.db = await asyncpg.create_pool(
                 dsn=self._db_dsn,
@@ -38,7 +35,6 @@ class DatabaseProvider(ZyraBase):
             self.log.info("Database pool initialized")
 
     async def close_database(self: "Zyra") -> None:
-        """Close the database pool."""
         if self.db is not None:
             await self.db.close()
             self.log.info("Database pool closed")

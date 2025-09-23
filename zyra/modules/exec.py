@@ -30,7 +30,7 @@ class Exec(module.Module):
         code = (ctx.msg.text or "").partition(" ")[2]
         if not code:
             reply: Optional[Message] = ctx.msg.reply_to_message
-            code = (reply.text or reply.caption or "") if reply else ""
+            code = reply.text or reply.caption or "" if reply else ""
 
         sent = await ctx.respond(
             "<code>...</code>",
@@ -38,7 +38,6 @@ class Exec(module.Module):
             parse_mode="HTML",
             allow_sending_without_reply=True,
         )
-
         if not (code or "").strip():
             with contextlib.suppress(Exception):
                 await sent.edit_text(
@@ -92,7 +91,6 @@ class Exec(module.Module):
             return
 
         data = query.data
-
         if data == "exec:del":
             replied = host_msg.reply_to_message
             if replied:
@@ -103,14 +101,14 @@ class Exec(module.Module):
                 await host_msg.delete()
 
             task = self._tasks.pop(host_msg.id, None)
-            if task and not task.done():
+            if task and (not task.done()):
                 task.cancel()
 
             return
 
         if data == "exec:cancel":
             task = self._tasks.pop(host_msg.id, None)
-            if task and not task.done():
+            if task and (not task.done()):
                 task.cancel()
 
             with contextlib.suppress(Exception):

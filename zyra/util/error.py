@@ -18,15 +18,6 @@ from telegram.ext import ContextTypes
 
 
 def format_exception_html(exc: BaseException, *, limit: Optional[int] = 8) -> str:
-    """Return an HTML-safe traceback for an exception.
-
-    Args:
-        exc: The exception to format.
-        limit: Maximum traceback frames to include. If None, include all.
-
-    Returns:
-        A string containing a <pre>...</pre>-wrapped HTML-escaped traceback.
-    """
     tb = "".join(
         traceback.format_exception(type(exc), exc, exc.__traceback__, limit=limit)
     )
@@ -40,20 +31,6 @@ def make_error_handler(
     redact: Optional[Callable[[str], str]] = None,
     notify_cooldown_s: int = 20,
 ):
-    """Create a PTB-compatible global error handler.
-
-    This handler classifies common PTB errors, logs appropriately, and
-    rate-limits owner notifications to avoid spam.
-
-    Args:
-        owner_id: Telegram user ID to notify for important errors.
-        logger: Optional logger. If not provided, falls back to application's logger.
-        redact: Optional callable to sanitize sensitive strings before sending/logging.
-        notify_cooldown_s: Minimum seconds between owner notifications.
-
-    Returns:
-        An async function suitable for Application.add_error_handler().
-    """
     last_notify_ts = 0.0
     redact = redact or (lambda s: s)
 
@@ -73,19 +50,11 @@ def make_error_handler(
                 logger.debug("Failed to notify owner: %s", e)
 
     async def _handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """PTB error handler.
-
-        Args:
-            update: The update that caused the error (may be None).
-            context: PTB context; context.error holds the exception.
-        """
-        exc = context.error  # type: ignore[attr-defined]
+        exc = context.error
         log = logger or getattr(getattr(context, "application", None), "logger", None)
-
         if log:
             log.error("Exception in handler", exc_info=exc)
 
-        # Transient / flow-control errors
         if isinstance(exc, RetryAfter):
             wait = max(1, int(getattr(exc, "retry_after", 1)))
             if log:
@@ -106,15 +75,14 @@ def make_error_handler(
 
             return
 
-        # BadRequest classification
         if isinstance(exc, BadRequest):
             text = str(exc).lower()
             benign = (
                 "message to delete not found" in text
                 or "message to edit not found" in text
                 or "message is not modified" in text
-                or "query is too old" in text
-                or "can't parse entities" in text
+                or ("query is too old" in text)
+                or ("can't parse entities" in text)
             )
             if benign:
                 if log:
@@ -124,12 +92,10 @@ def make_error_handler(
 
             html_tb = redact(format_exception_html(exc))
             await _notify_owner(
-                context,
-                "⚠️ <b>BadRequest</b>\n" f"{html.escape(str(exc))}\n\n" f"{html_tb}",
+                context, f"⚠️ <b>BadRequest</b>\n{html.escape(str(exc))}\n\n{html_tb}"
             )
             return
 
-        # Permissions/runner issues
         if isinstance(exc, Forbidden):
             if log:
                 log.info("Forbidden (insufficient rights / user blocked bot): %s", exc)
@@ -139,8 +105,7 @@ def make_error_handler(
         if isinstance(exc, Conflict):
             await _notify_owner(
                 context,
-                "⚠️ <b>Conflict</b> — multiple runners? Ensure only one poller/webhook is active.\n"
-                f"{html.escape(str(exc))}",
+                f"⚠️ <b>Conflict</b> — multiple runners? Ensure only one poller/webhook is active.\n{html.escape(str(exc))}",
             )
             return
 
@@ -150,13 +115,11 @@ def make_error_handler(
             )
             return
 
-        # Other TelegramError
         if isinstance(exc, TelegramError):
             html_tb = redact(format_exception_html(exc))
             await _notify_owner(context, f"⚠️ <b>TelegramError</b>\n{html_tb}")
             return
 
-        # Unknown exception
         html_tb = redact(format_exception_html(exc))
         await _notify_owner(context, f"⚠️ <b>Exception</b>\n{html_tb}")
 

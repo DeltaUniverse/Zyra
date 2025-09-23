@@ -11,7 +11,6 @@ class Stats(module.Module):
 
     async def on_load(self) -> None:
         await self._migrate()
-
         self.bot.register_listener(
             mod=self, event_name="stat_event", function=self.on_stat_event, priority=0
         )
@@ -27,29 +26,9 @@ class Stats(module.Module):
         )
 
     async def _migrate(self) -> None:
-        q1 = """
-        CREATE TABLE IF NOT EXISTS user_stats (
-            user_id BIGINT PRIMARY KEY,
-            messages BIGINT DEFAULT 0,
-            commands BIGINT DEFAULT 0,
-            last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-        """
-        q2 = """
-        CREATE TABLE IF NOT EXISTS chat_stats (
-            chat_id BIGINT PRIMARY KEY,
-            messages BIGINT DEFAULT 0,
-            commands BIGINT DEFAULT 0,
-            last_activity TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-        """
-        q3 = """
-        CREATE TABLE IF NOT EXISTS command_counters (
-            command TEXT PRIMARY KEY,
-            n BIGINT DEFAULT 0,
-            last_used TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-        """
+        q1 = "\n        CREATE TABLE IF NOT EXISTS user_stats (\n            user_id BIGINT PRIMARY KEY,\n            messages BIGINT DEFAULT 0,\n            commands BIGINT DEFAULT 0,\n            last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP\n        );\n        "
+        q2 = "\n        CREATE TABLE IF NOT EXISTS chat_stats (\n            chat_id BIGINT PRIMARY KEY,\n            messages BIGINT DEFAULT 0,\n            commands BIGINT DEFAULT 0,\n            last_activity TIMESTAMP DEFAULT CURRENT_TIMESTAMP\n        );\n        "
+        q3 = "\n        CREATE TABLE IF NOT EXISTS command_counters (\n            command TEXT PRIMARY KEY,\n            n BIGINT DEFAULT 0,\n            last_used TIMESTAMP DEFAULT CURRENT_TIMESTAMP\n        );\n        "
         try:
             await self.bot.db.execute(q1)
             await self.bot.db.execute(q2)
@@ -63,13 +42,7 @@ class Stats(module.Module):
 
         try:
             field = "commands" if is_command else "messages"
-            q = f"""
-            INSERT INTO user_stats (user_id, {field}, last_seen)
-            VALUES ($1, 1, CURRENT_TIMESTAMP)
-            ON CONFLICT (user_id) DO UPDATE
-              SET {field} = user_stats.{field} + 1,
-                  last_seen = CURRENT_TIMESTAMP;
-            """
+            q = f"\n            INSERT INTO user_stats (user_id, {field}, last_seen)\n            VALUES ($1, 1, CURRENT_TIMESTAMP)\n            ON CONFLICT (user_id) DO UPDATE\n              SET {field} = user_stats.{field} + 1,\n                  last_seen = CURRENT_TIMESTAMP;\n            "
             await self.bot.db.execute(q, user.id)
         except Exception as e:
             self.log.error(f"user_stats bump failed for {user.id}: {e}")
@@ -80,13 +53,7 @@ class Stats(module.Module):
 
         try:
             field = "commands" if is_command else "messages"
-            q = f"""
-            INSERT INTO chat_stats (chat_id, {field}, last_activity)
-            VALUES ($1, 1, CURRENT_TIMESTAMP)
-            ON CONFLICT (chat_id) DO UPDATE
-              SET {field} = chat_stats.{field} + 1,
-                  last_activity = CURRENT_TIMESTAMP;
-            """
+            q = f"\n            INSERT INTO chat_stats (chat_id, {field}, last_activity)\n            VALUES ($1, 1, CURRENT_TIMESTAMP)\n            ON CONFLICT (chat_id) DO UPDATE\n              SET {field} = chat_stats.{field} + 1,\n                  last_activity = CURRENT_TIMESTAMP;\n            "
             await self.bot.db.execute(q, chat.id)
         except Exception as e:
             self.log.error(f"chat_stats bump failed for {chat.id}: {e}")
@@ -96,13 +63,7 @@ class Stats(module.Module):
             return
 
         try:
-            q = """
-            INSERT INTO command_counters (command, n, last_used)
-            VALUES ($1, 1, CURRENT_TIMESTAMP)
-            ON CONFLICT (command) DO UPDATE
-              SET n = command_counters.n + 1,
-                  last_used = CURRENT_TIMESTAMP;
-            """
+            q = "\n            INSERT INTO command_counters (command, n, last_used)\n            VALUES ($1, 1, CURRENT_TIMESTAMP)\n            ON CONFLICT (command) DO UPDATE\n              SET n = command_counters.n + 1,\n                  last_used = CURRENT_TIMESTAMP;\n            "
             await self.bot.db.execute(q, cmd)
         except Exception as e:
             self.log.error(f"command bump failed for /{cmd}: {e}")
@@ -116,7 +77,6 @@ class Stats(module.Module):
         try:
             user = update.effective_user if update else None
             chat = update.effective_chat if update else None
-
             if stat_key == "msg":
                 await self._bump_user(user, is_command=False)
                 await self._bump_chat(chat, is_command=False)
@@ -156,7 +116,6 @@ class Stats(module.Module):
             top_cmds = await self.bot.db.fetch(
                 "SELECT command, n FROM command_counters ORDER BY n DESC, command ASC LIMIT 10"
             )
-
             lines = [
                 "📊 <b>Stats</b>",
                 f"👥 Users: <b>{total_users}</b>",
