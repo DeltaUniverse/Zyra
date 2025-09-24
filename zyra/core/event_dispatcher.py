@@ -1,13 +1,19 @@
+# zyra/core/event_dispatcher.py
 import asyncio
 import contextlib
 from enum import Enum
 from typing import TYPE_CHECKING, Any, MutableMapping, MutableSequence, Optional
 
-from telegram import CallbackQuery, Update
-from telegram.ext import CallbackContext
+from telegram import Update
 
 from .. import module
-from ..listener import Context, Listener
+from ..listener import (
+    CallbackQueryContext,
+    ChosenInlineResultContext,
+    Context,
+    InlineQueryContext,
+    Listener,
+)
 from .base import ZyraBase
 
 if TYPE_CHECKING:
@@ -50,7 +56,6 @@ class EventDispatcher(ZyraBase):
         self.update_module_events()
 
     def register_listeners(self: "Zyra", mod: module.Module) -> None:
-        # Message listeners
         if hasattr(mod, "on_message") and callable(getattr(mod, "on_message")):
             self._add_listener(
                 mod,
@@ -59,7 +64,7 @@ class EventDispatcher(ZyraBase):
                 priority=100,
                 flt=getattr(mod, "on_message_filter", None),
             )
-        # Command listeners
+
         if hasattr(mod, "on_command") and callable(getattr(mod, "on_command")):
             self._add_listener(
                 mod,
@@ -68,7 +73,7 @@ class EventDispatcher(ZyraBase):
                 priority=100,
                 flt=getattr(mod, "on_command_filter", None),
             )
-        # Callback query listeners
+
         if hasattr(mod, "on_callback_query") and callable(
             getattr(mod, "on_callback_query")
         ):
@@ -79,7 +84,29 @@ class EventDispatcher(ZyraBase):
                 priority=100,
                 flt=getattr(mod, "on_callback_query_filter", None),
             )
-        # Hook listeners: support on_load/on_start/... dengan event bucket "load"/"start"/...
+
+        if hasattr(mod, "on_inline_query") and callable(
+            getattr(mod, "on_inline_query")
+        ):
+            self._add_listener(
+                mod,
+                "inline_query",
+                getattr(mod, "on_inline_query"),
+                priority=100,
+                flt=getattr(mod, "on_inline_query_filter", None),
+            )
+
+        if hasattr(mod, "on_chosen_inline_result") and callable(
+            getattr(mod, "on_chosen_inline_result")
+        ):
+            self._add_listener(
+                mod,
+                "chosen_inline_result",
+                getattr(mod, "on_chosen_inline_result"),
+                priority=100,
+                flt=getattr(mod, "on_chosen_inline_result_filter", None),
+            )
+
         for hk in Hooks:
             meth = f"on_{hk.value}"
             if hasattr(mod, meth) and callable((bound := getattr(mod, meth))):
@@ -126,7 +153,7 @@ class EventDispatcher(ZyraBase):
             return False
 
     async def _dispatch_command(
-        self: "Zyra", update: Update, raw_context: Optional[CallbackContext] = None
+        self: "Zyra", update: Update, raw_context: Optional[Any] = None
     ) -> bool:
         msg = update.effective_message
         text = (msg.text or msg.caption) if msg else None
@@ -150,10 +177,9 @@ class EventDispatcher(ZyraBase):
             cmd_len=len(prefix) + len(invoker),
             segments=[invoker] + args,
             update=update,
+            raw_context=raw_context,
             last_update_time=None,
         )
-        ctx.raw_context = raw_context
-
         any_called = False
         for li in self.listeners.get("command", []):
             if not await self._passes_filter(li.filter, update):
@@ -176,8 +202,12 @@ class EventDispatcher(ZyraBase):
     async def dispatch_event(
         self: "Zyra", event_name: str, *args: Any, **kwargs: Any
     ) -> None:
-
-        if event_name not in ("message", "callback_query"):
+        if event_name not in (
+            "message",
+            "callback_query",
+            "inline_query",
+            "chosen_inline_result",
+        ):
             group = self.listeners.get(event_name)
             if not group:
                 return
@@ -192,11 +222,7 @@ class EventDispatcher(ZyraBase):
 
         if event_name == "message" and args and isinstance(args[0], Update):
             upd: Update = args[0]
-            raw_ctx: Optional[CallbackContext] = (
-                args[1]
-                if len(args) > 1 and isinstance(args[1], CallbackContext)
-                else None
-            )
+            raw_ctx = args[1] if len(args) > 1 else None
             if await self._dispatch_command(upd, raw_ctx):
                 return
 
@@ -210,10 +236,9 @@ class EventDispatcher(ZyraBase):
                 cmd_len=0,
                 segments=segments,
                 update=upd,
+                raw_context=raw_ctx,
                 last_update_time=None,
             )
-            ctx.raw_context = raw_ctx
-
             any_called = False
             for li in self.listeners.get("message", []):
                 if not await self._passes_filter(li.filter, upd):
@@ -230,26 +255,93 @@ class EventDispatcher(ZyraBase):
 
             return
 
-        # Callback query path
         if event_name == "callback_query" and args:
-            query: Optional[CallbackQuery] = None
-            first = args[0]
-            if isinstance(first, Update):
-                query = first.callback_query
-            elif isinstance(first, CallbackQuery):
-                query = first
-
-            if not query:
+            upd: Update = args[0] if isinstance(args[0], Update) else None
+            raw_ctx = args[1] if len(args) > 1 else None
+            if not upd or not upd.callback_query:
                 return
 
+            query = upd.callback_query
+            ctx = CallbackQueryContext(
+                bot=self,
+                query=query,
+                update=upd,
+                raw_context=raw_ctx,
+                last_update_time=None,
+            )
+            any_called = False
             for li in self.listeners.get("callback_query", []):
-                if not await self._passes_filter(li.filter, query):
+                if not await self._passes_filter(li.filter, upd):
                     continue
 
                 try:
-                    await li.func(query)
+                    await li.func(ctx)
+                    any_called = True
                 except Exception as exc:
                     self._log_exc(exc)
+
+            if any_called:
+                await self.log_stat("callback_query", upd, raw_ctx)
+
+            return
+
+        if event_name == "inline_query" and args:
+            upd: Update = args[0] if isinstance(args[0], Update) else None
+            raw_ctx = args[1] if len(args) > 1 else None
+            if not upd or not upd.inline_query:
+                return
+
+            query = upd.inline_query
+            ctx = InlineQueryContext(
+                bot=self,
+                query=query,
+                update=upd,
+                raw_context=raw_ctx,
+                last_update_time=None,
+            )
+            any_called = False
+            for li in self.listeners.get("inline_query", []):
+                if not await self._passes_filter(li.filter, upd):
+                    continue
+
+                try:
+                    await li.func(ctx)
+                    any_called = True
+                except Exception as exc:
+                    self._log_exc(exc)
+
+            if any_called:
+                await self.log_stat("inline_query", upd, raw_ctx)
+
+            return
+
+        if event_name == "chosen_inline_result" and args:
+            upd: Update = args[0] if isinstance(args[0], Update) else None
+            raw_ctx = args[1] if len(args) > 1 else None
+            if not upd or not upd.chosen_inline_result:
+                return
+
+            result = upd.chosen_inline_result
+            ctx = ChosenInlineResultContext(
+                bot=self,
+                result=result,
+                update=upd,
+                raw_context=raw_ctx,
+                last_update_time=None,
+            )
+            any_called = False
+            for li in self.listeners.get("chosen_inline_result", []):
+                if not await self._passes_filter(li.filter, upd):
+                    continue
+
+                try:
+                    await li.func(ctx)
+                    any_called = True
+                except Exception as exc:
+                    self._log_exc(exc)
+
+            if any_called:
+                await self.log_stat("chosen_inline_result", upd, raw_ctx)
 
             return
 
@@ -257,7 +349,7 @@ class EventDispatcher(ZyraBase):
         self: "Zyra",
         stat_key: str,
         update: Optional[Update] = None,
-        raw_context: Optional[CallbackContext] = None,
+        raw_context: Optional[Any] = None,
     ) -> None:
         for li in self.listeners.get("stat_event", []):
             try:

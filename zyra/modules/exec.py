@@ -1,3 +1,4 @@
+# zyra/modules/exec.py
 from __future__ import annotations
 
 import ast
@@ -9,10 +10,10 @@ import io
 import os
 from typing import Any, ClassVar, Dict
 
-from telegram import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from .. import module
-from ..listener import Context
+from ..listener import CallbackQueryContext, Context
 from ..util import time
 
 
@@ -55,20 +56,20 @@ class Exec(module.Module):
         task = asyncio.create_task(self._do_exec(sent, code, {"ctx": ctx}))
         self._tasks[sent.id] = task
 
-    async def on_callback_query(self, query: CallbackQuery) -> None:
-        if not query.data or not str(query.data).startswith("exec:"):
+    async def on_callback_query(self, ctx: CallbackQueryContext) -> None:
+        if not ctx.data or not str(ctx.data).startswith("exec:"):
             return
 
-        if query.from_user.id != self.bot.owner_id:
-            await query.answer("Who are you?", show_alert=True)
+        if ctx.user.id != self.bot.owner_id:
+            await ctx.answer("Who are you?", show_alert=True)
             return
 
-        await query.answer()
-        host_msg = query.message
+        await ctx.answer()
+        host_msg = ctx.message
         if not host_msg:
             return
 
-        data = query.data
+        data = ctx.data
 
         if data == "exec:del":
             replied = host_msg.reply_to_message
@@ -91,7 +92,7 @@ class Exec(module.Module):
                 task.cancel()
 
             with contextlib.suppress(Exception):
-                await host_msg.edit_text(
+                await ctx.edit_message_text(
                     "<b>Cancelling…</b>",
                     reply_markup=self._buttons(running=False),
                     parse_mode="HTML",
@@ -115,7 +116,7 @@ class Exec(module.Module):
             code = (code or "").strip()
             if not code:
                 with contextlib.suppress(Exception):
-                    await host_msg.edit_text(
+                    await ctx.edit_message_text(
                         "<code>Message Gone!</code>",
                         reply_markup=self._buttons(running=False),
                         parse_mode="HTML",
@@ -124,17 +125,15 @@ class Exec(module.Module):
                 return
 
             with contextlib.suppress(Exception):
-                await host_msg.edit_text(
+                await ctx.edit_message_text(
                     "<code>...</code>",
                     reply_markup=self._buttons(running=True),
                     parse_mode="HTML",
                 )
 
-            task = asyncio.create_task(self._do_exec(host_msg, code, {}))
+            task = asyncio.create_task(self._do_exec(host_msg, code, {"ctx": ctx}))
             self._tasks[host_msg.id] = task
             return
-
-    # ---------------- internal helpers ----------------
 
     def _buttons(self, *, running: bool) -> InlineKeyboardMarkup:
         row = [InlineKeyboardButton("Run", callback_data="exec:run")]
