@@ -51,7 +51,7 @@ class TelegramBot(ZyraBase):
     client: Bot
     owner_id: int
     prefix: str
-    user: User
+    me: User
     start_time_us: int
     _handlers: dict[str, Tuple[Handler, int]]
     __idle__: asyncio.Task[None]
@@ -111,7 +111,7 @@ class TelegramBot(ZyraBase):
             except Exception as e:
                 self.log.error(str(e))
 
-        self.user = await self.application.bot.get_me()
+        self.me = await self.application.bot.get_me()
         self.start_time_us = time.usec()
         await self.dispatch_event("start", self.start_time_us)
         self.log.info("Bot is ready")

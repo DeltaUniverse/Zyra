@@ -1,6 +1,3 @@
-# zyra/modules/exec.py
-from __future__ import annotations
-
 import ast
 import asyncio
 import contextlib
@@ -13,8 +10,26 @@ from typing import Any, ClassVar, Dict
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from .. import module
-from ..listener import CallbackQueryContext, Context
+from ..listener import (
+    CallbackQueryContext,
+    Context,
+    command,
+    cq_data_prefix,
+    desc,
+    filters,
+)
 from ..util import time
+
+
+def _owner_only(subject: Any) -> bool:
+    bot_owner = getattr(getattr(subject, "bot", None), "owner_id", None)
+    uid_msg = getattr(
+        getattr(getattr(subject, "message", None), "from_user", None), "id", None
+    )
+    uid_cb = getattr(
+        getattr(getattr(subject, "query", None), "from_user", None), "id", None
+    )
+    return (uid_msg or uid_cb) == bot_owner
 
 
 class Exec(module.Module):
@@ -25,26 +40,28 @@ class Exec(module.Module):
         self._tasks = {}
         self.log.info("Working")
 
+    @desc("Execute Python code (owner only)")
+    @command("exec", "e")
+    @filters(_owner_only)
     async def on_command(self, ctx: Context) -> None:
-        if ctx.invoker not in {"exec", "e"}:
+        if not ctx.message:
             return
 
-        if not ctx.msg or ctx.msg.from_user.id != self.bot.owner_id:
-            return
-
-        code = (ctx.input or "").strip()
-        if not code and ctx.msg.reply_to_message:
+        tail = ctx.text[ctx.cmd_len :].strip() if ctx.text else ""
+        code = tail or ""
+        if not code and ctx.message.reply_to_message:
             code = (
-                ctx.msg.reply_to_message.text or ctx.msg.reply_to_message.caption or ""
+                ctx.message.reply_to_message.text
+                or ctx.message.reply_to_message.caption
+                or ""
             ).strip()
 
-        sent = await ctx.respond(
+        sent = await ctx.message.reply_text(
             "<code>...</code>",
             reply_markup=self._buttons(running=True),
             parse_mode="HTML",
             allow_sending_without_reply=True,
         )
-
         if not code:
             with contextlib.suppress(Exception):
                 await sent.edit_text(
@@ -56,20 +73,18 @@ class Exec(module.Module):
         task = asyncio.create_task(self._do_exec(sent, code, {"ctx": ctx}))
         self._tasks[sent.id] = task
 
+    @desc("Exec control buttons (owner only)")
+    @cq_data_prefix("exec:")
+    @filters(_owner_only)
     async def on_callback_query(self, ctx: CallbackQueryContext) -> None:
-        if not ctx.data or not str(ctx.data).startswith("exec:"):
-            return
-
-        if ctx.user.id != self.bot.owner_id:
-            await ctx.answer("Who are you?", show_alert=True)
+        data = getattr(ctx.query, "data", None)
+        if not data:
             return
 
         await ctx.answer()
-        host_msg = ctx.message
+        host_msg = ctx.query.message
         if not host_msg:
             return
-
-        data = ctx.data
 
         if data == "exec:del":
             replied = host_msg.reply_to_message
@@ -92,7 +107,7 @@ class Exec(module.Module):
                 task.cancel()
 
             with contextlib.suppress(Exception):
-                await ctx.edit_message_text(
+                await ctx.query.edit_message_text(
                     "<b>Cancelling…</b>",
                     reply_markup=self._buttons(running=False),
                     parse_mode="HTML",
@@ -101,22 +116,23 @@ class Exec(module.Module):
             return
 
         if data == "exec:run":
-            code = ""
+            raw = ""
             if host_msg.reply_to_message:
                 raw = (
                     host_msg.reply_to_message.text
                     or host_msg.reply_to_message.caption
                     or ""
                 )
-                if raw.startswith(("/exec", ".exec", "/e", ".e")):
-                    code = raw.partition(" ")[2]
-                else:
-                    code = raw
+
+            if raw.startswith(("/exec", ".exec", "/e", ".e")):
+                code = raw.partition(" ")[2]
+            else:
+                code = raw
 
             code = (code or "").strip()
             if not code:
                 with contextlib.suppress(Exception):
-                    await ctx.edit_message_text(
+                    await ctx.query.edit_message_text(
                         "<code>Message Gone!</code>",
                         reply_markup=self._buttons(running=False),
                         parse_mode="HTML",
@@ -125,7 +141,7 @@ class Exec(module.Module):
                 return
 
             with contextlib.suppress(Exception):
-                await ctx.edit_message_text(
+                await ctx.query.edit_message_text(
                     "<code>...</code>",
                     reply_markup=self._buttons(running=True),
                     parse_mode="HTML",
@@ -133,7 +149,6 @@ class Exec(module.Module):
 
             task = asyncio.create_task(self._do_exec(host_msg, code, {"ctx": ctx}))
             self._tasks[host_msg.id] = task
-            return
 
     def _buttons(self, *, running: bool) -> InlineKeyboardMarkup:
         row = [InlineKeyboardButton("Run", callback_data="exec:run")]
@@ -154,9 +169,10 @@ class Exec(module.Module):
             )
             took_us = time.usec() - start_us
             text = f"<code>{html.escape(output)}</code>\n\n{time.format_duration_us(took_us)}"
-            kb = self._buttons(running=False)
             with contextlib.suppress(Exception):
-                await sent.edit_text(text, reply_markup=kb, parse_mode="HTML")
+                await sent.edit_text(
+                    text, reply_markup=self._buttons(running=False), parse_mode="HTML"
+                )
         except asyncio.CancelledError:
             took_us = time.usec() - start_us
             msg = f"<b>CancelledError</b>\n{time.format_duration_us(took_us)}"
@@ -182,7 +198,6 @@ class Exec(module.Module):
         }
         args.update(extra_args)
         args = dict(sorted(args.items()))
-
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             try:
@@ -205,25 +220,46 @@ class Exec(module.Module):
             node.body[-1] = ast.Return(value=node.body[-1].value)
 
         fn_name = "_zyra_aexec"
-        fn = ast.AsyncFunctionDef(
-            name=fn_name,
-            args=ast.arguments(
-                posonlyargs=[],
-                args=[ast.arg(arg=k) for k in env.keys()],
-                vararg=None,
-                kwonlyargs=[],
-                kw_defaults=[],
-                kwarg=None,
-                defaults=[],
-            ),
-            body=node.body,
-            decorator_list=[],
-            returns=None,
-            type_params=[],
-        )
+
+        def _mk_asyncdef():
+            try:
+                return ast.AsyncFunctionDef(
+                    name=fn_name,
+                    args=ast.arguments(
+                        posonlyargs=[],
+                        args=[ast.arg(arg=k) for k in env.keys()],
+                        vararg=None,
+                        kwonlyargs=[],
+                        kw_defaults=[],
+                        kwarg=None,
+                        defaults=[],
+                    ),
+                    body=node.body,
+                    decorator_list=[],
+                    returns=None,
+                    type_params=[],
+                )
+            except TypeError:
+                return ast.AsyncFunctionDef(
+                    name=fn_name,
+                    args=ast.arguments(
+                        posonlyargs=[],
+                        args=[ast.arg(arg=k) for k in env.keys()],
+                        vararg=None,
+                        kwonlyargs=[],
+                        kw_defaults=[],
+                        kwarg=None,
+                        defaults=[],
+                    ),
+                    body=node.body,
+                    decorator_list=[],
+                    returns=None,
+                )
+
+        fn = _mk_asyncdef()
         mod = ast.Module(body=[fn], type_ignores=[])
         ast.fix_missing_locations(mod)
         ns: Dict[str, Any] = {}
         exec(compile(mod, "<exec>", "exec"), ns)
-        coro = await ns[fn_name](*env.values())
+        coro = ns[fn_name](*env.values())
         return await coro if inspect.iscoroutine(coro) else coro
