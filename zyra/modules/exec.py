@@ -38,7 +38,6 @@ class Exec(module.Module):
 
     async def on_load(self) -> None:
         self._tasks = {}
-        self.log.info("Working")
 
     @desc("Execute Python code (owner only)")
     @command("exec", "e")

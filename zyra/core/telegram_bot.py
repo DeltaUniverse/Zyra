@@ -106,7 +106,7 @@ class TelegramBot(ZyraBase):
             await self.application.start()
             try:
                 await self.application.updater.start_polling(
-                    allowed_updates=EVENT_TYPES
+                    allowed_updates=EVENT_TYPES, drop_pending_updates=True
                 )
             except Exception as e:
                 self.log.error(str(e))

@@ -64,7 +64,20 @@ class System(module.Module):
             _f("Title", title),
             _f("User", f"@{username}" if username else "—"),
         ]
-        await ctx.reply("\n".join(lines), parse_mode="HTML")
+        caption = "\n".join(lines)
+
+        try:
+            if getattr(ch, "photo", None):
+                file_id = getattr(ch.photo, "big_file_id", None) or getattr(
+                    ch.photo, "small_file_id", None
+                )
+                if file_id:
+                    await ctx.reply_photo(file_id, caption=caption, parse_mode="HTML")
+                    return
+        except Exception:
+            pass
+
+        await ctx.reply(caption, parse_mode="HTML")
 
     @desc("Your profile information")
     @command("me")
@@ -85,7 +98,20 @@ class System(module.Module):
             _f("Lang", lang or "—"),
             _f("IsBot", "yes" if getattr(u, "is_bot", False) else "no"),
         ]
-        await ctx.reply("\n".join(lines), parse_mode="HTML")
+        caption = "\n".join(lines)
+
+        try:
+            photos = await ctx.bot.client.get_user_profile_photos(u.id, limit=1)
+            if getattr(photos, "total_count", 0) > 0 and photos.photos:
+                photo_size = photos.photos[0][-1]
+                await ctx.message.reply_photo(
+                    photo_size.file_id, caption=caption, parse_mode="HTML"
+                )
+                return
+        except Exception as e:
+            print(e)
+
+        await ctx.reply(caption, parse_mode="HTML")
 
     @desc("Uptime")
     @command("uptime")
