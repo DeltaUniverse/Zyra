@@ -1,3 +1,4 @@
+#
 import ast
 import asyncio
 import contextlib
@@ -5,62 +6,54 @@ import html
 import inspect
 import io
 import os
-from typing import Any, ClassVar, Dict
+from typing import Any, ClassVar, Dict, Optional
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Message
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Message, Update
+from telegram.ext import ContextTypes
 
 from .. import module
-from ..listener import (
-    CallbackQueryContext,
-    Context,
-    command,
-    cq_data_prefix,
-    desc,
-    filters,
-)
+from ..listener import Hooks, handler
 from ..util import time
-
-
-def _owner_only(subject: Any) -> bool:
-    bot_owner = getattr(getattr(subject, "bot", None), "owner_id", None)
-    uid_msg = getattr(
-        getattr(getattr(subject, "message", None), "from_user", None), "id", None
-    )
-    uid_cb = getattr(
-        getattr(getattr(subject, "query", None), "from_user", None), "id", None
-    )
-    return (uid_msg or uid_cb) == bot_owner
 
 
 class Exec(module.Module):
     name: ClassVar[str] = "exec"
     _tasks: Dict[int, asyncio.Task]
 
-    async def on_load(self) -> None:
+    @handler(Hooks.LOAD.value)
+    async def on_load(
+        self,
+        update: Optional[Update] = None,
+        context: Optional[ContextTypes.DEFAULT_TYPE] = None,
+    ) -> None:
         self._tasks = {}
 
-    @desc("Execute Python code (owner only)")
-    @command("exec", "e")
-    @filters(_owner_only)
-    async def on_command(self, ctx: Context) -> None:
-        if not ctx.message:
+    @handler("message", priority=100)
+    async def on_message(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
+        msg = update.effective_message
+        if not msg:
             return
 
-        tail = ctx.text[ctx.cmd_len :].strip() if ctx.text else ""
-        code = tail or ""
-        if not code and ctx.message.reply_to_message:
-            code = (
-                ctx.message.reply_to_message.text
-                or ctx.message.reply_to_message.caption
-                or ""
-            ).strip()
+        if not self._is_owner(update):
+            return
 
-        sent = await ctx.message.reply_text(
+        text = (msg.text or msg.caption or "").strip()
+        if not text:
+            return
+
+        if not self._is_exec_invocation(text):
+            return
+
+        code = self._extract_code_from_message(msg, text)
+        sent = await msg.reply_text(
             "<code>...</code>",
             reply_markup=self._buttons(running=True),
             parse_mode="HTML",
             allow_sending_without_reply=True,
         )
+
         if not code:
             with contextlib.suppress(Exception):
                 await sent.edit_text(
@@ -69,19 +62,28 @@ class Exec(module.Module):
 
             return
 
-        task = asyncio.create_task(self._do_exec(sent, code, {"ctx": ctx}))
+        task = asyncio.create_task(
+            self._do_exec(sent, code, {"update": update, "context": context})
+        )
         self._tasks[sent.id] = task
 
-    @desc("Exec control buttons (owner only)")
-    @cq_data_prefix("exec:")
-    @filters(_owner_only)
-    async def on_callback_query(self, ctx: CallbackQueryContext) -> None:
-        data = getattr(ctx.query, "data", None)
-        if not data:
+    @handler("callback_query", priority=100)
+    async def on_callback_query(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
+        cq = update.callback_query
+        if not cq:
             return
 
-        await ctx.answer()
-        host_msg = ctx.query.message
+        if not self._is_owner(update):
+            return
+
+        data = cq.data or ""
+        if not data.startswith("exec:"):
+            return
+
+        await cq.answer()
+        host_msg = cq.message
         if not host_msg:
             return
 
@@ -106,7 +108,7 @@ class Exec(module.Module):
                 task.cancel()
 
             with contextlib.suppress(Exception):
-                await ctx.query.edit_message_text(
+                await cq.edit_message_text(
                     "<b>Cancelling…</b>",
                     reply_markup=self._buttons(running=False),
                     parse_mode="HTML",
@@ -123,15 +125,10 @@ class Exec(module.Module):
                     or ""
                 )
 
-            if raw.startswith(("/exec", ".exec", "/e", ".e")):
-                code = raw.partition(" ")[2]
-            else:
-                code = raw
-
-            code = (code or "").strip()
+            code = self._strip_invoker(raw).strip()
             if not code:
                 with contextlib.suppress(Exception):
-                    await ctx.query.edit_message_text(
+                    await cq.edit_message_text(
                         "<code>Message Gone!</code>",
                         reply_markup=self._buttons(running=False),
                         parse_mode="HTML",
@@ -140,14 +137,49 @@ class Exec(module.Module):
                 return
 
             with contextlib.suppress(Exception):
-                await ctx.query.edit_message_text(
+                await cq.edit_message_text(
                     "<code>...</code>",
                     reply_markup=self._buttons(running=True),
                     parse_mode="HTML",
                 )
 
-            task = asyncio.create_task(self._do_exec(host_msg, code, {"ctx": ctx}))
+            task = asyncio.create_task(
+                self._do_exec(host_msg, code, {"update": update, "context": context})
+            )
             self._tasks[host_msg.id] = task
+
+    def _is_owner(self, update: Update) -> bool:
+        owner_id = getattr(self.bot, "owner_id", None)
+        uid_msg = getattr(
+            getattr(update.effective_message, "from_user", None), "id", None
+        )
+        uid_cq = getattr(getattr(update.callback_query, "from_user", None), "id", None)
+        return (uid_msg or uid_cq) == owner_id
+
+    def _is_exec_invocation(self, text: str) -> bool:
+        lower = text.lower()
+        return lower.startswith(("/exec", ".exec", "/e ", ".e ")) or lower in (
+            "/e",
+            ".e",
+        )
+
+    def _strip_invoker(self, text: str) -> str:
+        if text.startswith(("/exec", ".exec")):
+            return text.partition(" ")[2]
+
+        if text.startswith(("/e", ".e")):
+            return text.partition(" ")[2]
+
+        return text
+
+    def _extract_code_from_message(self, msg: Message, text: str) -> str:
+        code = self._strip_invoker(text).strip()
+        if not code and msg.reply_to_message:
+            code = (
+                msg.reply_to_message.text or msg.reply_to_message.caption or ""
+            ).strip()
+
+        return code
 
     def _buttons(self, *, running: bool) -> InlineKeyboardMarkup:
         row = [InlineKeyboardButton("Run", callback_data="exec:run")]
@@ -208,10 +240,7 @@ class Exec(module.Module):
                 output = f"{e.__class__.__name__}:\n  {e}"
 
         limit = 3800
-        if len(output) > limit:
-            output = output[:limit] + "…"
-
-        return output
+        return (output[:limit] + "…") if len(output) > limit else output
 
     async def _aexec(self, code: str, env: Dict[str, Any]):
         node = ast.parse(code, mode="exec")

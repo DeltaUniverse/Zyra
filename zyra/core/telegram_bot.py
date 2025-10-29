@@ -50,7 +50,6 @@ class TelegramBot(ZyraBase):
     application: Application
     client: Bot
     owner_id: int
-    prefix: str
     me: User
     start_time_us: int
     _handlers: dict[str, Tuple[Handler, int]]
@@ -87,7 +86,6 @@ class TelegramBot(ZyraBase):
 
         self.application = builder.build()
         self.client = self.application.bot
-        self.prefix = self.config["bot"]["prefix"]
         self.owner_id = self.config["rank"]["owner_id"]
         self.application.add_error_handler(
             error.make_error_handler(

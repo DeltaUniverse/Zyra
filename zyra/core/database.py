@@ -13,7 +13,7 @@ class DatabaseProvider(ZyraBase):
     db: Pool
 
     def __init__(self: "Zyra", **kwargs: Any) -> None:
-        section = self.config.get("database") or {}
+        section = self.config.get("bot") or {}
         dsn = section.get("db_uri")
         if not dsn:
             raise SystemExit("Missing database.db_uri in config")
