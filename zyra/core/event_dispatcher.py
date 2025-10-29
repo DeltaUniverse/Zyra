@@ -13,7 +13,7 @@ class EventDispatcher:
     def __init__(self: "Zyra", **kwargs: Any) -> None:
         self.listeners: Dict[str, List[Listener]] = {}
         try:
-            pref = self.bot.prefix
+            pref = self.config["bot"]["prefix"]
             self.prefixes: Iterable[str] = (
                 tuple(pref) if isinstance(pref, (list, tuple, set)) else (str(pref),)
             )
@@ -49,13 +49,39 @@ class EventDispatcher:
     def register_module(self, mod: Any) -> None:
         for name in dir(mod):
             fn = getattr(mod, name)
-            if callable(fn) and hasattr(fn, "_evt"):
-                self.add_listener(
-                    fn,
-                    getattr(fn, "_evt"),
-                    filters=getattr(fn, "_flt", None),
-                    priority=getattr(fn, "_prio", 100),
-                )
+            if not callable(fn):
+                continue
+
+            evt = getattr(fn, "_evt", None)
+            flt = getattr(fn, "_flt", None)
+            prio = getattr(fn, "_prio", 100)
+            cmds = getattr(fn, "_cmds", None)
+            if name.startswith("cmd_"):
+                primary = name[4:]
+                if primary:
+                    if evt is None:
+                        evt = "command"
+
+                    if evt == "command":
+                        merged: List[str] = []
+                        seen = set()
+                        for c in (primary,) + tuple(cmds or ()):
+                            k = c.lower()
+                            if k not in seen:
+                                seen.add(k)
+                                merged.append(c)
+
+                        cmds = tuple(merged)
+                        setattr(fn, "_cmds", cmds)
+                        setattr(fn, "_evt", evt)
+                        if flt is None:
+                            flt = None
+
+                        setattr(fn, "_flt", flt)
+                        setattr(fn, "_prio", prio)
+
+            if evt is not None:
+                self.add_listener(fn, evt, filters=flt, priority=prio)
 
     def unregister_module(self, mod: Any) -> None:
         mod_name = getattr(mod, "__name__", None)
