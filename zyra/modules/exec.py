@@ -1,4 +1,3 @@
-#
 import ast
 import asyncio
 import contextlib
@@ -12,7 +11,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Message, Update
 from telegram.ext import ContextTypes
 
 from .. import module
-from ..listener import Hooks, handler
+from ..listener import Hooks, command, handler
 from ..util import time
 
 
@@ -28,8 +27,8 @@ class Exec(module.Module):
     ) -> None:
         self._tasks = {}
 
-    @handler("message", priority=100)
-    async def on_message(
+    @command(("exec", "e"), priority=100)
+    async def on_command(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
     ) -> None:
         msg = update.effective_message
@@ -43,17 +42,14 @@ class Exec(module.Module):
         if not text:
             return
 
-        if not self._is_exec_invocation(text):
-            return
-
-        code = self._extract_code_from_message(msg, text)
+        code = self._extract_code_after_command(msg, text)
         sent = await msg.reply_text(
             "<code>...</code>",
             reply_markup=self._buttons(running=True),
             parse_mode="HTML",
+            do_quote=True,
             allow_sending_without_reply=True,
         )
-
         if not code:
             with contextlib.suppress(Exception):
                 await sent.edit_text(
@@ -67,7 +63,7 @@ class Exec(module.Module):
         )
         self._tasks[sent.id] = task
 
-    @handler("callback_query", priority=100)
+    @handler("callback_query")
     async def on_callback_query(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
     ) -> None:
@@ -75,14 +71,13 @@ class Exec(module.Module):
         if not cq:
             return
 
-        if not self._is_owner(update):
+        if cq.from_user.id != self.bot.owner_id:
             return
 
         data = cq.data or ""
         if not data.startswith("exec:"):
             return
 
-        await cq.answer()
         host_msg = cq.message
         if not host_msg:
             return
@@ -156,21 +151,26 @@ class Exec(module.Module):
         uid_cq = getattr(getattr(update.callback_query, "from_user", None), "id", None)
         return (uid_msg or uid_cq) == owner_id
 
-    def _is_exec_invocation(self, text: str) -> bool:
-        lower = text.lower()
-        return lower.startswith(("/exec", ".exec", "/e ", ".e ")) or lower in (
-            "/e",
-            ".e",
-        )
-
     def _strip_invoker(self, text: str) -> str:
-        if text.startswith(("/exec", ".exec")):
-            return text.partition(" ")[2]
+        if not text:
+            return ""
 
-        if text.startswith(("/e", ".e")):
-            return text.partition(" ")[2]
+        if text.startswith(("/", ".")):
+            return text.split(maxsplit=1)[1] if " " in text else ""
 
         return text
+
+    def _extract_code_after_command(self, msg: Message, text: str) -> str:
+        parts = text.split(maxsplit=1)
+        if len(parts) == 2:
+            return parts[1]
+
+        if msg.reply_to_message:
+            return (
+                msg.reply_to_message.text or msg.reply_to_message.caption or ""
+            ).strip()
+
+        return ""
 
     def _extract_code_from_message(self, msg: Message, text: str) -> str:
         code = self._strip_invoker(text).strip()

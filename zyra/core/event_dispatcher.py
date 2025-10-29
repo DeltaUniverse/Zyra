@@ -1,23 +1,25 @@
 import asyncio
-from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
 
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from ..listener import Listener, Hooks
+from ..listener import Hooks, Listener
 
 _HOOKS = {e.value for e in Hooks}
-_AwaitableBool = Union[bool, asyncio.Future]
 
 
 class EventDispatcher:
     def __init__(self: "Zyra", **kwargs: Any) -> None:
         self.listeners: Dict[str, List[Listener]] = {}
         try:
-            pref = self.config["bot"]["prefix"]
-            self.prefixes: Iterable[str] = tuple(pref) if isinstance(pref, (list, tuple, set)) else (str(pref),)
+            pref = self.bot.prefix
+            self.prefixes: Iterable[str] = (
+                tuple(pref) if isinstance(pref, (list, tuple, set)) else (str(pref),)
+            )
         except Exception:
             self.prefixes = ("/",)
+
         self.bot_username: Optional[str] = None
         super().__init__(**kwargs)
 
@@ -63,6 +65,7 @@ class EventDispatcher:
             ]
             if not self.listeners[ev]:
                 del self.listeners[ev]
+
         if hasattr(self, "update_module_events"):
             try:
                 self.update_module_events()  # type: ignore[attr-defined]
@@ -80,26 +83,35 @@ class EventDispatcher:
     ) -> bool:
         if flt is None:
             return True
+
         if isinstance(flt, (list, tuple, set)):
             for f in flt:
                 if not await self._passes(f, update, context):
                     return False
+
             return True
+
         if callable(flt) and not hasattr(flt, "check_update"):
             res = flt(update, context)
             if asyncio.iscoroutine(res):
                 res = await res
+
             if isinstance(res, (list, tuple, set)):
                 for sub in res:
                     if not await self._passes(sub, update, context):
                         return False
+
                 return True
+
             return bool(res)
+
         if hasattr(flt, "check_update"):
             res = flt.check_update(update)
             if asyncio.iscoroutine(res):
                 res = await res
+
             return bool(res)
+
         return bool(flt)
 
     def _extract_command(self, update: Update) -> Optional[Tuple[str, List[str]]]:
@@ -107,20 +119,25 @@ class EventDispatcher:
         text = (msg.text or msg.caption) if msg else None
         if not text:
             return None
+
         prefix = next((p for p in self.prefixes if text.startswith(p)), None)
         if not prefix:
             return None
-        parts = text[len(prefix):].split()
+
+        parts = text[len(prefix) :].split()
         if not parts:
             return None
+
         token, *args = parts
         if "@" in token:
             base, at_user = token.split("@", 1)
             if self.bot_username and at_user.lower() != self.bot_username.lower():
                 return None
+
             cmd = base
         else:
             cmd = token
+
         return cmd, args
 
     async def _dispatch_command(
@@ -129,17 +146,29 @@ class EventDispatcher:
         parsed = self._extract_command(update)
         if not parsed:
             return False
+
+        cmd, _args = parsed
+        cmd_l = cmd.lower()
         bucket = self.listeners.get("command", [])
         if not bucket:
             return False
+
         tasks: Set[asyncio.Task[Any]] = set()
         for li in bucket:
             if not await self._passes(li.filters, update, context):
                 continue
+
+            cmds = getattr(li.func, "_cmds", None)
+            if cmds is not None:
+                if cmd_l not in {c.lower() for c in cmds}:
+                    continue
+
             tasks.add(asyncio.create_task(li.func(update, context)))
+
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
             return True
+
         return False
 
     async def dispatch(
@@ -152,13 +181,16 @@ class EventDispatcher:
     ) -> None:
         if event == "message" and await self._dispatch_command(update, context):
             return
+
         bucket = self.listeners.get(event, [])
         if not bucket:
             return
+
         tasks: Set[asyncio.Task[Any]] = set()
         for li in bucket:
             if li.event in _HOOKS or await self._passes(li.filters, update, context):
                 tasks.add(asyncio.create_task(li.func(update, context)))
+
         if tasks and wait:
             await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -172,6 +204,7 @@ class EventDispatcher:
         bucket = self.listeners.get(ev, [])
         if not bucket:
             return
+
         tasks = [asyncio.create_task(li.func(update, context)) for li in bucket]
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
