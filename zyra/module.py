@@ -9,6 +9,7 @@ if TYPE_CHECKING:
 
 
 class Module:
+    __slots__ = ("bot", "log", "comment")
     name: ClassVar[str] = "Unnamed"
     disabled: ClassVar[bool] = False
     bot: "Zyra"

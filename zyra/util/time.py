@@ -17,30 +17,22 @@ def sec() -> int:
 
 def format_duration_us(t_us: Union[int, float]) -> str:
     t_us = int(t_us)
-    t_ms = t_us / 1000
-    t_s = t_ms / 1000
-    t_m = t_s / 60
-    t_h = t_m / 60
-    t_d = t_h / 24
-    if t_d >= 1:
-        rem_h = t_h % 24
-        return "%dd %dh" % (t_d, rem_h)
+    if t_us >= 86400000000:
+        return f"{t_us // 86400000000}d {(t_us % 86400000000) // 3600000000}h"
 
-    if t_h >= 1:
-        rem_m = t_m % 60
-        return "%dh %dm" % (t_h, rem_m)
+    if t_us >= 3600000000:
+        return f"{t_us // 3600000000}h {(t_us % 3600000000) // 60000000}m"
 
-    if t_m >= 1:
-        rem_s = t_s % 60
-        return "%dm %ds" % (t_m, rem_s)
+    if t_us >= 60000000:
+        return f"{t_us // 60000000}m {(t_us % 60000000) // 1000000}s"
 
-    if t_s >= 1:
-        return "%d sec" % t_s
+    if t_us >= 1000000:
+        return f"{t_us // 1000000} sec"
 
-    if t_ms >= 1:
-        return "%d ms" % t_ms
+    if t_us >= 1000:
+        return f"{t_us // 1000} ms"
 
-    return "%d μs" % t_us
+    return f"{t_us} μs"
 
 
 def format_duration_td(value: timedelta, precision: int = 0) -> str:
