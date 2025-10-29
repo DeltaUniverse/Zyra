@@ -5,13 +5,13 @@ import html
 import inspect
 import io
 import os
-from typing import Any, ClassVar, Dict, Optional
+from typing import Any, ClassVar, Dict
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Message, Update
 from telegram.ext import ContextTypes
 
 from .. import module
-from ..listener import Hooks, command, handler
+from ..listener import command, handler
 from ..util import time
 
 
@@ -19,12 +19,7 @@ class Exec(module.Module):
     name: ClassVar[str] = "exec"
     _tasks: Dict[int, asyncio.Task]
 
-    @handler(Hooks.LOAD.value)
-    async def on_load(
-        self,
-        update: Optional[Update] = None,
-        context: Optional[ContextTypes.DEFAULT_TYPE] = None,
-    ) -> None:
+    async def on_load(self) -> None:
         self._tasks = {}
 
     @command(("exec", "e"), priority=100)

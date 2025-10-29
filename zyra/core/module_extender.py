@@ -4,13 +4,12 @@ from types import ModuleType
 from typing import TYPE_CHECKING, Any, Iterable, MutableMapping, Optional, Type
 
 from .. import custom_modules, module, modules, util
-from .base import ZyraBase
 
 if TYPE_CHECKING:
     from .bot import Zyra
 
 
-class ModuleExtender(ZyraBase):
+class ModuleExtender:
     modules: MutableMapping[str, module.Module]
 
     def __init__(self: "Zyra", **kwargs: Any) -> None:
@@ -27,13 +26,15 @@ class ModuleExtender(ZyraBase):
 
         mod = cls(self)
         mod.comment = comment
-        self.register_listeners(mod)
+        # Expect EventDispatcher methods to exist; no fallbacks.
+        self.register_module(mod)
         self.modules[cls.name] = mod
 
     def unload_module(self: "Zyra", mod: module.Module) -> None:
         cls = type(mod)
         self.log.info("Unloading %s", mod.format_desc(mod.comment))
-        self.unregister_listeners(mod)
+        # Expect EventDispatcher methods to exist; no fallbacks.
+        self.unregister_module(mod)
         del self.modules[cls.name]
 
     def _load_all_from_metamod(

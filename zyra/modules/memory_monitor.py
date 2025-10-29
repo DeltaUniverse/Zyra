@@ -8,14 +8,13 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from .. import module
-from ..listener import Hooks, command, handler
+from ..listener import command
 
 
 class MemoryMonitor(module.Module):
     name: ClassVar[str] = "Memory"
 
-    @handler(Hooks.LOAD.value)
-    async def on_load(self, update, ctx) -> None:
+    async def on_load(self) -> None:
         self.process = psutil.Process(os.getpid())
 
     @command(("memory", "mem", "ram"))

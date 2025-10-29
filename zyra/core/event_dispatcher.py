@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 from typing import Any, List, Optional, Set, Tuple
 
 from telegram import Update
@@ -39,14 +40,12 @@ class EventDispatcher:
             filters=filters if event not in _HOOKS else None,
         )
         bucket = self.listeners.setdefault(event, [])
-
-        insert_pos = len(bucket)
         for i, existing in enumerate(bucket):
             if existing.priority > priority:
-                insert_pos = i
+                bucket.insert(i, li)
                 break
-
-        bucket.insert(insert_pos, li)
+        else:
+            bucket.append(li)
 
         if hasattr(self, "update_module_events"):
             try:
@@ -65,40 +64,50 @@ class EventDispatcher:
             prio = getattr(fn, "_prio", 100)
             cmds = getattr(fn, "_cmds", None)
 
+            if (
+                evt is None
+                and name.startswith("on_")
+                and (hook := name.removeprefix("on_")) in _HOOKS
+            ):
+                evt, flt = hook, None
+
             if name.startswith("cmd_"):
                 primary = name[4:]
                 if primary:
-                    if evt is None:
-                        evt = "command"
+                    evt = evt or "command"
+                    merged: List[str] = []
+                    seen = set()
+                    for c in (primary,) + tuple(cmds or ()):
+                        k = c.lower()
+                        if k not in seen:
+                            seen.add(k)
+                            merged.append(c)
 
-                    if evt == "command":
-                        merged: List[str] = []
-                        seen = set()
-                        for c in (primary,) + tuple(cmds or ()):
-                            k = c.lower()
-                            if k not in seen:
-                                seen.add(k)
-                                merged.append(c)
+                    cmds = tuple(merged)
+                    setattr(fn, "_cmds", cmds)
+                    setattr(fn, "_evt", evt)
+                    setattr(fn, "_flt", flt)
+                    setattr(fn, "_prio", prio)
 
-                        cmds = tuple(merged)
-                        setattr(fn, "_cmds", cmds)
-                        setattr(fn, "_evt", evt)
-                        if flt is None:
-                            flt = None
-
-                        setattr(fn, "_flt", flt)
-                        setattr(fn, "_prio", prio)
-
-            if evt is not None:
+            if evt:
                 self.add_listener(fn, evt, filters=flt, priority=prio)
 
     def unregister_module(self, mod: Any) -> None:
         mod_name = getattr(mod, "__name__", None)
         for ev in list(self.listeners):
-            self.listeners[ev] = [
-                li for li in self.listeners[ev] if li.func.__module__ != mod_name
-            ]
-            if not self.listeners[ev]:
+            new_bucket: List[Listener] = []
+            for li in self.listeners[ev]:
+                if hasattr(li.func, "__self__") and li.func.__self__ is mod:
+                    continue
+
+                if mod_name and getattr(li.func, "__module__", None) == mod_name:
+                    continue
+
+                new_bucket.append(li)
+
+            if new_bucket:
+                self.listeners[ev] = new_bucket
+            else:
                 del self.listeners[ev]
 
         if hasattr(self, "update_module_events"):
@@ -106,12 +115,6 @@ class EventDispatcher:
                 self.update_module_events()
             except Exception:
                 pass
-
-    def register_listeners(self, mod: Any) -> None:
-        self.register_module(mod)
-
-    def unregister_listeners(self, mod: Any) -> None:
-        self.unregister_module(mod)
 
     async def _passes(
         self, flt: Any, update: Update, context: ContextTypes.DEFAULT_TYPE
@@ -179,6 +182,19 @@ class EventDispatcher:
 
         return None
 
+    async def _invoke(self, func: Any, update: Any, context: Any) -> None:
+        try:
+            sig = inspect.signature(func)
+            argc = sum(
+                1
+                for p in sig.parameters.values()
+                if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)
+            )
+        except Exception:
+            argc = 2
+
+        await (func(update, context) if argc >= 2 else func())
+
     async def _dispatch_command(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
     ) -> bool:
@@ -198,11 +214,10 @@ class EventDispatcher:
                 continue
 
             cmds = getattr(li.func, "_cmds", None)
-            if cmds is not None:
-                if cmd_l not in {c.lower() for c in cmds}:
-                    continue
+            if cmds and cmd_l not in {c.lower() for c in cmds}:
+                continue
 
-            tasks.add(asyncio.create_task(li.func(update, context)))
+            tasks.add(asyncio.create_task(self._invoke(li.func, update, context)))
 
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
@@ -216,7 +231,7 @@ class EventDispatcher:
         update: Update,
         context: ContextTypes.DEFAULT_TYPE,
         *,
-        wait: bool = True
+        wait: bool = True,
     ) -> None:
         if event == "message" and await self._dispatch_command(update, context):
             return
@@ -228,7 +243,7 @@ class EventDispatcher:
         tasks: Set[asyncio.Task[Any]] = set()
         for li in bucket:
             if li.event in _HOOKS or await self._passes(li.filters, update, context):
-                tasks.add(asyncio.create_task(li.func(update, context)))
+                tasks.add(asyncio.create_task(self._invoke(li.func, update, context)))
 
         if tasks and wait:
             await asyncio.gather(*tasks, return_exceptions=True)
@@ -244,44 +259,11 @@ class EventDispatcher:
         if not bucket:
             return
 
-        tasks = [asyncio.create_task(li.func(update, context)) for li in bucket]
+        tasks = [
+            asyncio.create_task(self._invoke(li.func, update, context)) for li in bucket
+        ]
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
-
-    async def on_load(
-        self,
-        update: Optional[Update] = None,
-        context: Optional[ContextTypes.DEFAULT_TYPE] = None,
-    ) -> None:
-        await self.emit_hook(Hooks.LOAD, update, context)
-
-    async def on_start(
-        self,
-        update: Optional[Update] = None,
-        context: Optional[ContextTypes.DEFAULT_TYPE] = None,
-    ) -> None:
-        await self.emit_hook(Hooks.START, update, context)
-
-    async def on_started(
-        self,
-        update: Optional[Update] = None,
-        context: Optional[ContextTypes.DEFAULT_TYPE] = None,
-    ) -> None:
-        await self.emit_hook(Hooks.STARTED, update, context)
-
-    async def on_stop(
-        self,
-        update: Optional[Update] = None,
-        context: Optional[ContextTypes.DEFAULT_TYPE] = None,
-    ) -> None:
-        await self.emit_hook(Hooks.STOP, update, context)
-
-    async def on_stopped(
-        self,
-        update: Optional[Update] = None,
-        context: Optional[ContextTypes.DEFAULT_TYPE] = None,
-    ) -> None:
-        await self.emit_hook(Hooks.STOPPED, update, context)
 
     async def dispatch_event(
         self,
@@ -289,17 +271,9 @@ class EventDispatcher:
         update: Optional[Update] = None,
         context: Optional[ContextTypes.DEFAULT_TYPE] = None,
         *,
-        wait: bool = True
+        wait: bool = True,
     ) -> None:
-        if event == Hooks.LOAD.value:
-            await self.on_load(update, context)
-        elif event == Hooks.START.value:
-            await self.on_start(update, context)
-        elif event == Hooks.STARTED.value:
-            await self.on_started(update, context)
-        elif event == Hooks.STOP.value:
-            await self.on_stop(update, context)
-        elif event == Hooks.STOPPED.value:
-            await self.on_stopped(update, context)
+        if event in _HOOKS:
+            await self.emit_hook(Hooks(event), update, context)
         else:
             await self.dispatch(event, update, context, wait=wait)
