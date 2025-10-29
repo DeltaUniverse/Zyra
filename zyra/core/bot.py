@@ -24,12 +24,13 @@ class Zyra(TelegramBot, DatabaseProvider, EventDispatcher, ModuleExtender):
     def __init__(self, config: Mapping[str, Any]) -> None:
         self.config = config
         self.log = logging.getLogger("Bot")
-        self.loop = asyncio.get_event_loop()
+        self.loop = asyncio.get_running_loop()
         self.stopping = False
         super().__init__()
         self.http = httpx.AsyncClient(
-            limits=httpx.Limits(max_keepalive_connections=5, max_connections=10),
-            timeout=httpx.Timeout(10.0),
+            limits=httpx.Limits(max_keepalive_connections=10, max_connections=20),
+            timeout=httpx.Timeout(15.0),
+            http2=False,
         )
 
     @classmethod
@@ -42,27 +43,35 @@ class Zyra(TelegramBot, DatabaseProvider, EventDispatcher, ModuleExtender):
         if loop:
             asyncio.set_event_loop(loop)
 
+        bot = cls(config)
         try:
-            bot = cls(config)
             await bot.setup_database()
             await bot.run()
         finally:
+            await bot.cleanup()
             asyncio.get_event_loop().stop()
 
+    async def cleanup(self) -> None:
+        await self.close_database()
+        await self.http.aclose()
+
     async def stop(self) -> None:
+        if self.stopping:
+            return
+
         self.stopping = True
         self.log.info("Stopping")
+
         if self.loaded:
             await self.dispatch_event("stop")
 
-        try:
-            await self.application.stop()
-            await self.application.updater.stop()
-        except Exception:
-            pass
+        await asyncio.gather(
+            self.application.stop(),
+            self.application.updater.stop(),
+            return_exceptions=True,
+        )
 
-        await self.close_database()
-        await self.http.aclose()
-        self.log.info("Running post-stop hooks")
+        await self.cleanup()
+
         if self.loaded:
             await self.dispatch_event("stopped")

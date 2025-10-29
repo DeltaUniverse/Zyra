@@ -10,11 +10,11 @@ if TYPE_CHECKING:
 
 
 class DatabaseProvider(ZyraBase):
+
     db: Pool
 
     def __init__(self: "Zyra", **kwargs: Any) -> None:
-        section = self.config.get("bot") or {}
-        dsn = section.get("db_uri")
+        dsn = self.config.get("bot", {}).get("db_uri")
         if not dsn:
             raise SystemExit("Missing database.db_uri in config")
 
@@ -26,15 +26,15 @@ class DatabaseProvider(ZyraBase):
         if self.db is None:
             self.db = await asyncpg.create_pool(
                 dsn=self._db_dsn,
-                min_size=1,
-                max_size=5,
-                command_timeout=15.0,
-                max_inactive_connection_lifetime=180.0,
+                min_size=2,
+                max_size=10,
+                command_timeout=20.0,
+                max_inactive_connection_lifetime=300.0,
+                max_cached_statement_lifetime=300.0,
                 server_settings={"application_name": "Zyra", "jit": "off"},
             )
-            self.log.info("Database pool initialized")
 
     async def close_database(self: "Zyra") -> None:
         if self.db is not None:
             await self.db.close()
-            self.log.info("Database pool closed")
+            self.db = None
