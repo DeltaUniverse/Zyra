@@ -42,14 +42,15 @@ class ModuleExtender(ZyraBase):
         for module_mod in submodules:
             for sym in dir(module_mod):
                 cls = getattr(module_mod, sym)
-                if not (inspect.isclass(cls) and issubclass(cls, module.Module)):
+                if (
+                    not inspect.isclass(cls)
+                    or not issubclass(cls, module.Module)
+                    or cls is module.Module
+                ):
                     continue
 
-                if getattr(cls, "disabled", False):
-                    self.log.info("Skipping %s", cls.format_desc(comment))
-                    continue
-
-                self.load_module(cls, comment=comment)
+                if not getattr(cls, "disabled", False):
+                    self.load_module(cls, comment=comment)
 
     def load_all_modules(self: "Zyra") -> None:
         self.log.info("Loading modules")

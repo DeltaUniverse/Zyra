@@ -26,10 +26,10 @@ class DatabaseProvider(ZyraBase):
         if self.db is None:
             self.db = await asyncpg.create_pool(
                 dsn=self._db_dsn,
-                min_size=2,
-                max_size=10,
-                command_timeout=30.0,
-                max_inactive_connection_lifetime=300.0,
+                min_size=1,
+                max_size=5,
+                command_timeout=15.0,
+                max_inactive_connection_lifetime=180.0,
                 server_settings={"application_name": "Zyra", "jit": "off"},
             )
             self.log.info("Database pool initialized")

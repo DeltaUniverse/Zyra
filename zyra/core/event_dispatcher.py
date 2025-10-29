@@ -1,5 +1,5 @@
 import asyncio
-from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
+from typing import Any, List, Optional, Set, Tuple
 
 from telegram import Update
 from telegram.ext import ContextTypes
@@ -10,26 +10,27 @@ _HOOKS = {e.value for e in Hooks}
 
 
 class EventDispatcher:
+    __slots__ = ()
+
+    listeners: dict[str, List[Listener]]
+    prefixes: tuple[str, ...]
+    bot_username: Optional[str]
+
     def __init__(self: "Zyra", **kwargs: Any) -> None:
-        self.listeners: Dict[str, List[Listener]] = {}
+        self.listeners = {}
         try:
             pref = self.config["bot"]["prefix"]
-            self.prefixes: Iterable[str] = (
+            self.prefixes = (
                 tuple(pref) if isinstance(pref, (list, tuple, set)) else (str(pref),)
             )
         except Exception:
             self.prefixes = ("/",)
 
-        self.bot_username: Optional[str] = None
+        self.bot_username = None
         super().__init__(**kwargs)
 
     def add_listener(
-        self,
-        func: Callable[..., Any],
-        event: str,
-        *,
-        filters: Any = None,
-        priority: int = 100,
+        self, func: Any, event: str, *, filters: Any = None, priority: int = 100
     ) -> None:
         li = Listener(
             priority=priority,
@@ -38,11 +39,18 @@ class EventDispatcher:
             filters=filters if event not in _HOOKS else None,
         )
         bucket = self.listeners.setdefault(event, [])
-        bucket.append(li)
-        bucket.sort()
+
+        insert_pos = len(bucket)
+        for i, existing in enumerate(bucket):
+            if existing.priority > priority:
+                insert_pos = i
+                break
+
+        bucket.insert(insert_pos, li)
+
         if hasattr(self, "update_module_events"):
             try:
-                self.update_module_events()  # type: ignore[attr-defined]
+                self.update_module_events()
             except Exception:
                 pass
 
@@ -56,6 +64,7 @@ class EventDispatcher:
             flt = getattr(fn, "_flt", None)
             prio = getattr(fn, "_prio", 100)
             cmds = getattr(fn, "_cmds", None)
+
             if name.startswith("cmd_"):
                 primary = name[4:]
                 if primary:
@@ -94,7 +103,7 @@ class EventDispatcher:
 
         if hasattr(self, "update_module_events"):
             try:
-                self.update_module_events()  # type: ignore[attr-defined]
+                self.update_module_events()
             except Exception:
                 pass
 
@@ -142,29 +151,33 @@ class EventDispatcher:
 
     def _extract_command(self, update: Update) -> Optional[Tuple[str, List[str]]]:
         msg = update.effective_message
-        text = (msg.text or msg.caption) if msg else None
+        if not msg:
+            return None
+
+        text = msg.text or msg.caption
         if not text:
             return None
 
-        prefix = next((p for p in self.prefixes if text.startswith(p)), None)
-        if not prefix:
-            return None
+        for prefix in self.prefixes:
+            if text.startswith(prefix):
+                parts = text[len(prefix) :].split()
+                if not parts:
+                    return None
 
-        parts = text[len(prefix) :].split()
-        if not parts:
-            return None
+                token = parts[0]
+                if "@" in token:
+                    base, at_user = token.split("@", 1)
+                    if (
+                        self.bot_username
+                        and at_user.lower() != self.bot_username.lower()
+                    ):
+                        return None
 
-        token, *args = parts
-        if "@" in token:
-            base, at_user = token.split("@", 1)
-            if self.bot_username and at_user.lower() != self.bot_username.lower():
-                return None
+                    return base, parts[1:]
 
-            cmd = base
-        else:
-            cmd = token
+                return token, parts[1:]
 
-        return cmd, args
+        return None
 
     async def _dispatch_command(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
@@ -203,7 +216,7 @@ class EventDispatcher:
         update: Update,
         context: ContextTypes.DEFAULT_TYPE,
         *,
-        wait: bool = True,
+        wait: bool = True
     ) -> None:
         if event == "message" and await self._dispatch_command(update, context):
             return
@@ -276,7 +289,7 @@ class EventDispatcher:
         update: Optional[Update] = None,
         context: Optional[ContextTypes.DEFAULT_TYPE] = None,
         *,
-        wait: bool = True,
+        wait: bool = True
     ) -> None:
         if event == Hooks.LOAD.value:
             await self.on_load(update, context)

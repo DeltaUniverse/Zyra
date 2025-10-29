@@ -27,7 +27,10 @@ class Zyra(TelegramBot, DatabaseProvider, EventDispatcher, ModuleExtender):
         self.loop = asyncio.get_event_loop()
         self.stopping = False
         super().__init__()
-        self.http = httpx.AsyncClient()
+        self.http = httpx.AsyncClient(
+            limits=httpx.Limits(max_keepalive_connections=5, max_connections=10),
+            timeout=httpx.Timeout(10.0),
+        )
 
     @classmethod
     async def create_and_run(

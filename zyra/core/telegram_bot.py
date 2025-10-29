@@ -47,6 +47,8 @@ EVENT_TYPES: list[UpdateType] = [
 
 
 class TelegramBot(ZyraBase):
+    __slots__ = ()
+
     application: Application
     client: Bot
     owner_id: int
@@ -100,16 +102,14 @@ class TelegramBot(ZyraBase):
         self.load_all_modules()
         await self.dispatch_event("load")
         self.loaded = True
-        async with asyncio.Lock():
-            await self.application.start()
-            try:
-                await self.application.updater.start_polling(
-                    allowed_updates=EVENT_TYPES, drop_pending_updates=True
-                )
-            except Exception as e:
-                self.log.error(str(e))
+
+        await self.application.start()
+        await self.application.updater.start_polling(
+            allowed_updates=EVENT_TYPES, drop_pending_updates=True
+        )
 
         self.me = await self.application.bot.get_me()
+        self.bot_username = self.me.username
         self.start_time_us = time.usec()
         await self.dispatch_event("start", self.start_time_us)
         self.log.info("Bot is ready")
@@ -122,7 +122,7 @@ class TelegramBot(ZyraBase):
         signal_names: dict[Any, str] = {
             k: v
             for v, k in signal.__dict__.items()
-            if v.startswith("SIG") and (not v.startswith("SIG_"))
+            if v.startswith("SIG") and not v.startswith("SIG_")
         }
 
         def clear_handler() -> None:
@@ -188,7 +188,6 @@ class TelegramBot(ZyraBase):
             self.application.remove_handler(h, group=g)
 
     def update_module_events(self: "Zyra") -> None:
-        # Message events
         msg_filter = (
             filters.ALL
             & ~filters.StatusUpdate.NEW_CHAT_MEMBERS
@@ -202,7 +201,6 @@ class TelegramBot(ZyraBase):
             force=True,
         )
 
-        # Chat actions (status updates)
         chat_action_filter = (
             filters.StatusUpdate.NEW_CHAT_MEMBERS
             | filters.StatusUpdate.LEFT_CHAT_MEMBER
@@ -215,20 +213,15 @@ class TelegramBot(ZyraBase):
             force=True,
         )
 
-        # Callback queries
         self._bind_event(
             "callback_query",
             CallbackQueryHandler(self._evt_callback),
             group=0,
             force=True,
         )
-
-        # Inline queries
         self._bind_event(
             "inline_query", InlineQueryHandler(self._evt_inline), group=0, force=True
         )
-
-        # Chosen inline result
         self._bind_event(
             "chosen_inline_result",
             ChosenInlineResultHandler(self._evt_chosen),
@@ -239,35 +232,30 @@ class TelegramBot(ZyraBase):
     async def _evt_message(
         self: "Zyra", update: Update, context: ContextTypes.DEFAULT_TYPE
     ) -> None:
-        if update.effective_message:
-            await self.dispatch_event("message", update, context)
+        await self.dispatch_event("message", update, context)
 
     async def _evt_callback(
         self: "Zyra", update: Update, context: ContextTypes.DEFAULT_TYPE
     ) -> None:
-        if update.callback_query:
-            await self.dispatch_event("callback_query", update, context)
+        await self.dispatch_event("callback_query", update, context)
 
     async def _evt_inline(
         self: "Zyra", update: Update, context: ContextTypes.DEFAULT_TYPE
     ) -> None:
-        if update.inline_query:
-            await self.dispatch_event("inline_query", update, context)
+        await self.dispatch_event("inline_query", update, context)
 
     async def _evt_chosen(
         self: "Zyra", update: Update, context: ContextTypes.DEFAULT_TYPE
     ) -> None:
-        if update.chosen_inline_result:
-            await self.dispatch_event("chosen_inline_result", update, context)
+        await self.dispatch_event("chosen_inline_result", update, context)
 
     @property
     def events_activated(self: "Zyra") -> int:
         return len(self._handlers)
 
     def redact_message(self: "Zyra", text: str) -> str:
-        redacted = "[REDACTED]"
         bot_token = self.config["telegram"].get("token")
         if bot_token and bot_token in text:
-            text = text.replace(bot_token, redacted)
+            return text.replace(bot_token, "[REDACTED]")
 
         return text
