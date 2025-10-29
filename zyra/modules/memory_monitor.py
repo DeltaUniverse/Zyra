@@ -1,0 +1,76 @@
+import asyncio
+import gc
+import os
+from typing import ClassVar
+
+import psutil
+from telegram import Update
+from telegram.ext import ContextTypes
+
+from .. import module
+from ..listener import Hooks, command, handler
+
+
+class MemoryMonitor(module.Module):
+    name: ClassVar[str] = "Memory"
+
+    @handler(Hooks.LOAD.value)
+    async def on_load(self, update, ctx) -> None:
+        self.process = psutil.Process(os.getpid())
+
+    @command(("memory", "mem", "ram"))
+    async def memory(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        msg = update.effective_message
+        if not msg:
+            return
+
+        mem_info = self.process.memory_info()
+        mem_percent = self.process.memory_percent()
+
+        rss_mb = mem_info.rss / 1024 / 1024
+        vms_mb = mem_info.vms / 1024 / 1024
+
+        system_mem = psutil.virtual_memory()
+        total_gb = system_mem.total / 1024 / 1024 / 1024
+        available_gb = system_mem.available / 1024 / 1024 / 1024
+        used_percent = system_mem.percent
+
+        text = (
+            f"<b>Process Memory:</b>\n"
+            f"├ RSS: <code>{rss_mb:.2f} MB</code>\n"
+            f"├ VMS: <code>{vms_mb:.2f} MB</code>\n"
+            f"└ Usage: <code>{mem_percent:.1f}%</code>\n\n"
+            f"<b>System Memory:</b>\n"
+            f"├ Total: <code>{total_gb:.2f} GB</code>\n"
+            f"├ Available: <code>{available_gb:.2f} GB</code>\n"
+            f"└ Used: <code>{used_percent}%</code>"
+        )
+
+        await msg.reply_text(text, parse_mode="HTML")
+
+    @command("gc")
+    async def gc(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        msg = update.effective_message
+        if not msg:
+            return
+
+        if msg.from_user.id != self.bot.owner_id:
+            return
+
+        before = self.process.memory_info().rss / 1024 / 1024
+
+        collected = gc.collect()
+        await asyncio.sleep(0.1)
+
+        after = self.process.memory_info().rss / 1024 / 1024
+        freed = before - after
+
+        text = (
+            f"<b>Garbage Collection:</b>\n"
+            f"├ Objects: <code>{collected}</code>\n"
+            f"├ Before: <code>{before:.2f} MB</code>\n"
+            f"├ After: <code>{after:.2f} MB</code>\n"
+            f"└ Freed: <code>{freed:.2f} MB</code>"
+        )
+
+        await msg.reply_text(text, parse_mode="HTML")
