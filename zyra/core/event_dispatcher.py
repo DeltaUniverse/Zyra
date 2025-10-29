@@ -10,7 +10,6 @@ _HOOKS = frozenset(e.value for e in Hooks)
 
 
 class EventDispatcher:
-
     def __init__(self: "Zyra", **kwargs: Any) -> None:
         self.listeners = {}
         pref = self.config.get("bot", {}).get("prefix", "/")
@@ -30,7 +29,6 @@ class EventDispatcher:
             filters=filters if event not in _HOOKS else None,
         )
         bucket = self.listeners.setdefault(event, [])
-
         insert_idx = len(bucket)
         for i, existing in enumerate(bucket):
             if existing.priority > priority:
@@ -38,7 +36,6 @@ class EventDispatcher:
                 break
 
         bucket.insert(insert_idx, li)
-
         if hasattr(self, "update_module_events"):
             self.update_module_events()
 
@@ -52,7 +49,6 @@ class EventDispatcher:
             flt = getattr(fn, "_flt", None)
             prio = getattr(fn, "_prio", 100)
             cmds = getattr(fn, "_cmds", None)
-
             if evt is None and name.startswith("on_"):
                 hook = name[3:]
                 if hook in _HOOKS:
@@ -80,7 +76,6 @@ class EventDispatcher:
 
     def unregister_module(self, mod: Any) -> None:
         mod_name = getattr(mod, "__name__", None)
-
         for ev, listeners in list(self.listeners.items()):
             self.listeners[ev] = [
                 li
@@ -88,7 +83,6 @@ class EventDispatcher:
                 if not (hasattr(li.func, "__self__") and li.func.__self__ is mod)
                 and not (mod_name and getattr(li.func, "__module__", None) == mod_name)
             ]
-
             if not self.listeners[ev]:
                 del self.listeners[ev]
 
@@ -150,7 +144,6 @@ class EventDispatcher:
 
             token = parts[0]
             args = parts[1].split() if len(parts) > 1 else []
-
             if "@" in token:
                 base, at_user = token.split("@", 1)
                 if self.me.username and at_user.lower() != self.me.username.lower():
@@ -167,6 +160,8 @@ class EventDispatcher:
             await func(update, context)
         except TypeError:
             await func()
+        except Exception as e:
+            self.log.exception(f"Error in listener {func.__name__}: {e}")
 
     async def _dispatch_command(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
@@ -193,10 +188,14 @@ class EventDispatcher:
             matched.append(li.func)
 
         if matched:
-            await asyncio.gather(
+            results = await asyncio.gather(
                 *(self._invoke(func, update, context) for func in matched),
-                return_exceptions=True
+                return_exceptions=True,
             )
+            for res in results:
+                if isinstance(res, Exception):
+                    self.log.exception("Error in command dispatch", exc_info=res)
+
             return True
 
         return False
@@ -207,7 +206,7 @@ class EventDispatcher:
         update: Update,
         context: ContextTypes.DEFAULT_TYPE,
         *,
-        wait: bool = True
+        wait: bool = True,
     ) -> None:
         if event == "message" and await self._dispatch_command(update, context):
             return
@@ -221,9 +220,11 @@ class EventDispatcher:
             for li in bucket
             if li.event in _HOOKS or await self._passes(li.filters, update, context)
         ]
-
         if tasks and wait:
-            await asyncio.gather(*tasks, return_exceptions=True)
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            for res in results:
+                if isinstance(res, Exception):
+                    self.log.exception("Error in event dispatch", exc_info=res)
 
     async def emit_hook(
         self,
@@ -233,10 +234,13 @@ class EventDispatcher:
     ) -> None:
         bucket = self.listeners.get(hook.value, [])
         if bucket:
-            await asyncio.gather(
+            results = await asyncio.gather(
                 *(self._invoke(li.func, update, context) for li in bucket),
-                return_exceptions=True
+                return_exceptions=True,
             )
+            for res in results:
+                if isinstance(res, Exception):
+                    self.log.exception("Error in hook emit", exc_info=res)
 
     async def dispatch_event(
         self,
@@ -244,7 +248,7 @@ class EventDispatcher:
         update: Optional[Update] = None,
         context: Optional[ContextTypes.DEFAULT_TYPE] = None,
         *,
-        wait: bool = True
+        wait: bool = True,
     ) -> None:
         if event in _HOOKS:
             await self.emit_hook(Hooks(event), update, context)

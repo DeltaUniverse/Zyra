@@ -221,6 +221,7 @@ class Exec(module.Module):
             "asyncio": asyncio,
             "html": html,
             "os": os,
+            "db": self.bot.db,
         }
         args.update(extra_args)
         args = dict(sorted(args.items()))
