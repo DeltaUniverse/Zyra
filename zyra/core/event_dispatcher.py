@@ -1,5 +1,5 @@
 import asyncio
-from typing import Any, List, Optional, Tuple
+from typing import Any, Optional
 
 from telegram import Update
 from telegram.ext import ContextTypes
@@ -20,7 +20,6 @@ class EventDispatcher:
         self.prefixes = (
             tuple(pref) if isinstance(pref, (list, tuple, set)) else (str(pref),)
         )
-        self._prefix_cache = {}
         super().__init__(**kwargs)
 
     def add_listener(
@@ -34,6 +33,7 @@ class EventDispatcher:
             self=self,
         )
         bucket = self.listeners.setdefault(event, [])
+
         insert_idx = len(bucket)
         for i, existing in enumerate(bucket):
             if existing.priority > priority:
@@ -59,18 +59,18 @@ class EventDispatcher:
             prio = getattr(base, "_prio", 100)
             cmds = getattr(base, "_cmds", None)
 
+            # Auto-detect hooks from on_* methods (backwards compat)
             if evt is None and name.startswith("on_"):
                 hook = name[3:]
                 if hook in _HOOKS:
-                    evt, flt = hook, None
-                    setattr(base, "_evt", evt)
-                    setattr(base, "_flt", flt)
-                    setattr(base, "_prio", prio)
+                    evt = hook
+                    flt = None
 
-            if name.startswith("cmd_"):
+            # Auto-detect commands from cmd_* methods (backwards compat)
+            if evt is None and name.startswith("cmd_"):
                 primary = name[4:]
                 if primary:
-                    evt = evt or "command"
+                    evt = "command"
                     seen = set()
                     merged = []
                     for c in (primary,) + (cmds or ()):
@@ -79,17 +79,14 @@ class EventDispatcher:
                             seen.add(k)
                             merged.append(c)
 
-                    setattr(base, "_cmds", tuple(merged))
-                    setattr(base, "_evt", evt)
-                    setattr(base, "_flt", flt)
-                    setattr(base, "_prio", prio)
+                    cmds = tuple(merged)
+                    setattr(base, "_cmds", cmds)
 
-            evt_now = getattr(base, "_evt", None)
-            flt_now = getattr(base, "_flt", None)
-            prio_now = getattr(base, "_prio", 100)
-
-            if evt_now:
-                self.add_listener(fn, evt_now, filters=flt_now, priority=prio_now)
+            if evt:
+                setattr(base, "_evt", evt)
+                setattr(base, "_flt", flt)
+                setattr(base, "_prio", prio)
+                self.add_listener(fn, evt, filters=flt, priority=prio)
 
     def unregister_module(self, mod: Any) -> None:
         mod_name = getattr(mod, "__name__", None)
@@ -106,43 +103,7 @@ class EventDispatcher:
         if hasattr(self, "update_module_events"):
             self.update_module_events()
 
-    async def _passes(
-        self, flt: Any, update: Update, context: ContextTypes.DEFAULT_TYPE
-    ) -> bool:
-        if flt is None:
-            return True
-
-        if isinstance(flt, (list, tuple, set)):
-            for f in flt:
-                if not await self._passes(f, update, context):
-                    return False
-
-            return True
-
-        if callable(flt) and not hasattr(flt, "check_update"):
-            res = flt(update, context)
-            if asyncio.iscoroutine(res):
-                res = await res
-
-            if isinstance(res, (list, tuple, set)):
-                for sub in res:
-                    if not await self._passes(sub, update, context):
-                        return False
-
-                return True
-
-            return bool(res)
-
-        if hasattr(flt, "check_update"):
-            res = flt.check_update(update)
-            if asyncio.iscoroutine(res):
-                res = await res
-
-            return bool(res)
-
-        return bool(flt)
-
-    def _extract_command(self, update: Update) -> Optional[Tuple[str, List[str]]]:
+    def _extract_command(self, update: Update) -> Optional[tuple[str, list[str]]]:
         msg = update.effective_message
         if not msg:
             return None
@@ -161,6 +122,7 @@ class EventDispatcher:
 
             token = parts[0]
             args = parts[1].split() if len(parts) > 1 else []
+
             if "@" in token:
                 base, at_user = token.split("@", 1)
                 if self.me.username and at_user.lower() != self.me.username.lower():
@@ -180,6 +142,14 @@ class EventDispatcher:
         except Exception as e:
             self.log.exception(f"Error in listener {func.__name__}: {e}")
 
+    async def _gather_with_logging(self, tasks: list, context_name: str) -> None:
+        if not tasks:
+            return
+
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for exc in (r for r in results if isinstance(r, Exception)):
+            self.log.exception(f"Error in {context_name}", exc_info=exc)
+
     async def _dispatch_command(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
     ) -> bool:
@@ -190,31 +160,28 @@ class EventDispatcher:
         cmd, args_list = parsed
         setattr(context, "args", args_list)
         setattr(context, "command", cmd)
-        cmd_l = cmd.lower()
+
         bucket = self.listeners.get("command", [])
         if not bucket:
             return False
 
-        matched = []
+        cmd_lower = cmd.lower()
+        tasks = []
+
         for li in bucket:
             if not await li.check(update, context):
                 continue
 
             cmds = getattr(_base_func(li.func), "_cmds", None)
-            if cmds and cmd_l not in {c.lower() for c in cmds}:
-                continue
+            if cmds:
+                cmds_lower = {c.lower() for c in cmds}
+                if cmd_lower not in cmds_lower:
+                    continue
 
-            matched.append(li.func)
+            tasks.append(self._invoke(li.func, update, context))
 
-        if matched:
-            results = await asyncio.gather(
-                *(self._invoke(func, update, context) for func in matched),
-                return_exceptions=True,
-            )
-            for res in results:
-                if isinstance(res, Exception):
-                    self.log.exception("Error in command dispatch", exc_info=res)
-
+        if tasks:
+            await self._gather_with_logging(tasks, "command dispatch")
             return True
 
         return False
@@ -239,11 +206,9 @@ class EventDispatcher:
             for li in bucket
             if li.event in _HOOKS or await li.check(update, context)
         ]
+
         if tasks and wait:
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-            for res in results:
-                if isinstance(res, Exception):
-                    self.log.exception("Error in event dispatch", exc_info=res)
+            await self._gather_with_logging(tasks, f"event '{event}'")
 
     async def emit_hook(
         self,
@@ -252,14 +217,11 @@ class EventDispatcher:
         context: Optional[ContextTypes.DEFAULT_TYPE] = None,
     ) -> None:
         bucket = self.listeners.get(hook.value, [])
-        if bucket:
-            results = await asyncio.gather(
-                *(self._invoke(li.func, update, context) for li in bucket),
-                return_exceptions=True,
-            )
-            for res in results:
-                if isinstance(res, Exception):
-                    self.log.exception("Error in hook emit", exc_info=res)
+        if not bucket:
+            return
+
+        tasks = [self._invoke(li.func, update, context) for li in bucket]
+        await self._gather_with_logging(tasks, f"hook '{hook.value}'")
 
     async def dispatch_event(
         self,
