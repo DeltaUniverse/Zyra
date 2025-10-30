@@ -62,6 +62,9 @@ class EventDispatcher:
                 hook = name[3:]
                 if hook in _HOOKS:
                     evt, flt = hook, None
+                    setattr(base, "_evt", evt)
+                    setattr(base, "_flt", flt)
+                    setattr(base, "_prio", prio)
 
             if name.startswith("cmd_"):
                 primary = name[4:]

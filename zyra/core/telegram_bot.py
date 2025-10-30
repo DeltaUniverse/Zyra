@@ -47,12 +47,13 @@ EVENT_TYPES: list[UpdateType] = [
 
 
 class TelegramBot(ZyraBase):
-    __slots__ = ()
 
     application: Application
     client: Bot
-    owner_id: int
     me: User
+
+    owner_id: int
+    sudoers: set[int]
     start_time_us: int
     _handlers: dict[str, Tuple[Handler, int]]
     __idle__: asyncio.Task[None]
@@ -61,6 +62,7 @@ class TelegramBot(ZyraBase):
         self.loaded = False
         self._handlers = {}
         self.__idle__ = None
+        self.sudoers = set()
         super().__init__(**kwargs)
 
     async def init_client(self: "Zyra") -> None:
@@ -89,6 +91,8 @@ class TelegramBot(ZyraBase):
         self.application = builder.build()
         self.client = self.application.bot
         self.owner_id = self.config["rank"]["owner_id"]
+        sudo = await self.db.fetch("SELECT id FROM users WHERE rank = 'sudoer';")
+        self.sudoers = {int(r["id"]) for r in sudo}
         self.application.add_error_handler(
             error.make_error_handler(
                 self.owner_id, logger=self.log, redact=self.redact_message

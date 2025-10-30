@@ -74,16 +74,15 @@ class Operators(module.Module):
                     await msg.reply_text(
                         f"✅ <b>Added sudoer</b>\nID: <code>{target_id}</code>"
                     )
+                    self.bot.sudoers.add(target_id)
                 else:
                     await conn.execute(
                         "UPDATE users SET rank='nobody' WHERE id=$1", target_id
                     )
+                    self.bot.sudoers.discard(target_id)
                     await msg.reply_text(
                         f"🗑️ <b>Removed sudoer</b>\nID: <code>{target_id}</code>"
                     )
-
-            if hasattr(self.bot, "load_sudoers"):
-                await self.bot.load_sudoers()
 
             return
 
