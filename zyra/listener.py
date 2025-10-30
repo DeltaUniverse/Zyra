@@ -24,6 +24,51 @@ class Listener:
     func: Func = field(compare=False)
     filters: Optional[Filter] = field(default=None, compare=False)
     commands: Optional[Sequence[str]] = field(default=None, compare=False)
+    self: Optional["Zyra"] = field(default=None, compare=False)
+
+    async def check(self, update, context) -> bool:
+        flt = self.filters
+        if flt is None:
+            return True
+
+        if isinstance(flt, (list, tuple, set)):
+            for f in flt:
+                sub = Listener(
+                    self.priority, self.event, self.func, f, self.commands, self.self
+                )
+                if not await sub.check(update, context):
+                    return False
+
+            return True
+
+        if callable(flt):
+            res = None
+            try:
+                res = flt(update, context, self.self)
+            except TypeError:
+                res = flt(update, context)
+
+            if hasattr(res, "__await__"):
+                res = await res
+
+            if isinstance(res, (list, tuple, set)):
+                for sub in res:
+                    sub_li = Listener(
+                        self.priority,
+                        self.event,
+                        self.func,
+                        sub,
+                        self.commands,
+                        self.self,
+                    )
+                    if not await sub_li.check(update, context):
+                        return False
+
+                return True
+
+            return bool(res)
+
+        return bool(flt)
 
 
 def handler(
@@ -58,3 +103,30 @@ def command(
         return fn
 
     return wrap
+
+
+def rank_limit(rank: str | None = None):
+    def _check(update, context, self):
+        u = getattr(update, "effective_user", None)
+        if not u:
+            return False
+
+        r = (rank or "").strip().lower()
+        if r == "" or r is None:
+            return True
+
+        if r == "owner":
+            return u.id == getattr(self, "owner_id", None)
+
+        if r == "sudo":
+            owner_id = getattr(self, "owner_id", None)
+            sudoers = getattr(self, "sudoers", set())
+
+            return u.id == owner_id or u.id in sudoers
+
+        if r == "nobody":
+            return False
+
+        return False
+
+    return _check

@@ -3,7 +3,7 @@ from typing import ClassVar, Optional
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from .. import module
+from .. import listener, module
 
 
 class Operators(module.Module):
@@ -21,13 +21,10 @@ class Operators(module.Module):
                 """
             )
 
-    async def cmd_sudo(
-        self, update: Update, context: ContextTypes.DEFAULT_TYPE
-    ) -> None:
+    @listener.command("sudo", filters=listener.rank_limit("owner"))
+    async def sudo(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         msg = update.effective_message
-        user = update.effective_user
-        if not (user and user.id == getattr(self.bot, "owner_id", None)):
-            return
+        update.effective_user
 
         args = context.args or []
         sub = args[0].lower() if args else "list"

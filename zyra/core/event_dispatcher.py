@@ -31,6 +31,7 @@ class EventDispatcher:
             event=event,
             func=func,
             filters=filters if event not in _HOOKS else None,
+            self=self,
         )
         bucket = self.listeners.setdefault(event, [])
         insert_idx = len(bucket)
@@ -187,8 +188,6 @@ class EventDispatcher:
             return False
 
         cmd, args_list = parsed
-
-        # make args available to handlers expecting PTB-style context.args
         setattr(context, "args", args_list)
         setattr(context, "command", cmd)
         cmd_l = cmd.lower()
@@ -198,7 +197,7 @@ class EventDispatcher:
 
         matched = []
         for li in bucket:
-            if not await self._passes(li.filters, update, context):
+            if not await li.check(update, context):
                 continue
 
             cmds = getattr(_base_func(li.func), "_cmds", None)
@@ -238,7 +237,7 @@ class EventDispatcher:
         tasks = [
             self._invoke(li.func, update, context)
             for li in bucket
-            if li.event in _HOOKS or await self._passes(li.filters, update, context)
+            if li.event in _HOOKS or await li.check(update, context)
         ]
         if tasks and wait:
             results = await asyncio.gather(*tasks, return_exceptions=True)
