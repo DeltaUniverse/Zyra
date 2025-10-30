@@ -9,6 +9,10 @@ from ..listener import Hooks, Listener
 _HOOKS = frozenset(e.value for e in Hooks)
 
 
+def _base_func(fn: Any) -> Any:
+    return getattr(fn, "__func__", fn)
+
+
 class EventDispatcher:
     def __init__(self: "Zyra", **kwargs: Any) -> None:
         self.listeners = {}
@@ -40,15 +44,20 @@ class EventDispatcher:
             self.update_module_events()
 
     def register_module(self, mod: Any) -> None:
+        cls = type(mod)
         for name in dir(mod):
             fn = getattr(mod, name, None)
             if not callable(fn):
                 continue
 
-            evt = getattr(fn, "_evt", None)
-            flt = getattr(fn, "_flt", None)
-            prio = getattr(fn, "_prio", 100)
-            cmds = getattr(fn, "_cmds", None)
+            raw = getattr(cls, name, fn)
+            base = _base_func(raw)
+
+            evt = getattr(base, "_evt", None)
+            flt = getattr(base, "_flt", None)
+            prio = getattr(base, "_prio", 100)
+            cmds = getattr(base, "_cmds", None)
+
             if evt is None and name.startswith("on_"):
                 hook = name[3:]
                 if hook in _HOOKS:
@@ -66,13 +75,17 @@ class EventDispatcher:
                             seen.add(k)
                             merged.append(c)
 
-                    fn._cmds = tuple(merged)
-                    fn._evt = evt
-                    fn._flt = flt
-                    fn._prio = prio
+                    setattr(base, "_cmds", tuple(merged))
+                    setattr(base, "_evt", evt)
+                    setattr(base, "_flt", flt)
+                    setattr(base, "_prio", prio)
 
-            if evt:
-                self.add_listener(fn, evt, filters=flt, priority=prio)
+            evt_now = getattr(base, "_evt", None)
+            flt_now = getattr(base, "_flt", None)
+            prio_now = getattr(base, "_prio", 100)
+
+            if evt_now:
+                self.add_listener(fn, evt_now, filters=flt_now, priority=prio_now)
 
     def unregister_module(self, mod: Any) -> None:
         mod_name = getattr(mod, "__name__", None)
@@ -170,7 +183,11 @@ class EventDispatcher:
         if not parsed:
             return False
 
-        cmd, _args = parsed
+        cmd, args_list = parsed
+
+        # make args available to handlers expecting PTB-style context.args
+        setattr(context, "args", args_list)
+        setattr(context, "command", cmd)
         cmd_l = cmd.lower()
         bucket = self.listeners.get("command", [])
         if not bucket:
@@ -181,7 +198,7 @@ class EventDispatcher:
             if not await self._passes(li.filters, update, context):
                 continue
 
-            cmds = getattr(li.func, "_cmds", None)
+            cmds = getattr(_base_func(li.func), "_cmds", None)
             if cmds and cmd_l not in {c.lower() for c in cmds}:
                 continue
 
