@@ -11,7 +11,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Message, Update
 from telegram.ext import ContextTypes
 
 from .. import module
-from ..listener import command, handler
+from ..listener import handler
 from ..util import time
 
 
@@ -22,7 +22,7 @@ class Exec(module.Module):
     async def on_load(self) -> None:
         self._tasks = {}
 
-    @command(("exec", "e"), priority=100)
+    @handler(["exec", "e"], priority=100)
     async def on_command(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
     ) -> None:
@@ -245,42 +245,40 @@ class Exec(module.Module):
 
         fn_name = "_zyra_aexec"
 
-        def _mk_asyncdef():
-            try:
-                return ast.AsyncFunctionDef(
-                    name=fn_name,
-                    args=ast.arguments(
-                        posonlyargs=[],
-                        args=[ast.arg(arg=k) for k in env.keys()],
-                        vararg=None,
-                        kwonlyargs=[],
-                        kw_defaults=[],
-                        kwarg=None,
-                        defaults=[],
-                    ),
-                    body=node.body,
-                    decorator_list=[],
-                    returns=None,
-                    type_params=[],
-                )
-            except TypeError:
-                return ast.AsyncFunctionDef(
-                    name=fn_name,
-                    args=ast.arguments(
-                        posonlyargs=[],
-                        args=[ast.arg(arg=k) for k in env.keys()],
-                        vararg=None,
-                        kwonlyargs=[],
-                        kw_defaults=[],
-                        kwarg=None,
-                        defaults=[],
-                    ),
-                    body=node.body,
-                    decorator_list=[],
-                    returns=None,
-                )
+        try:
+            fn = ast.AsyncFunctionDef(
+                name=fn_name,
+                args=ast.arguments(
+                    posonlyargs=[],
+                    args=[ast.arg(arg=k) for k in env.keys()],
+                    vararg=None,
+                    kwonlyargs=[],
+                    kw_defaults=[],
+                    kwarg=None,
+                    defaults=[],
+                ),
+                body=node.body,
+                decorator_list=[],
+                returns=None,
+                type_params=[],
+            )
+        except TypeError:
+            fn = ast.AsyncFunctionDef(
+                name=fn_name,
+                args=ast.arguments(
+                    posonlyargs=[],
+                    args=[ast.arg(arg=k) for k in env.keys()],
+                    vararg=None,
+                    kwonlyargs=[],
+                    kw_defaults=[],
+                    kwarg=None,
+                    defaults=[],
+                ),
+                body=node.body,
+                decorator_list=[],
+                returns=None,
+            )
 
-        fn = _mk_asyncdef()
         mod = ast.Module(body=[fn], type_ignores=[])
         ast.fix_missing_locations(mod)
         ns: Dict[str, Any] = {}

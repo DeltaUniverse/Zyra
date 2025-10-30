@@ -26,14 +26,12 @@ class ModuleExtender:
 
         mod = cls(self)
         mod.comment = comment
-        # Expect EventDispatcher methods to exist; no fallbacks.
         self.register_module(mod)
         self.modules[cls.name] = mod
 
     def unload_module(self: "Zyra", mod: module.Module) -> None:
         cls = type(mod)
         self.log.info("Unloading %s", mod.format_desc(mod.comment))
-        # Expect EventDispatcher methods to exist; no fallbacks.
         self.unregister_module(mod)
         del self.modules[cls.name]
 

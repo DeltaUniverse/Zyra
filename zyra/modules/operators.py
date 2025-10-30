@@ -3,28 +3,16 @@ from typing import ClassVar, Optional
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from .. import listener, module
+from .. import module
+from ..listener import handler, rank_limit
 
 
 class Operators(module.Module):
     name: ClassVar[str] = "operators"
 
-    async def on_load(self) -> None:
-        async with self.bot.db.acquire() as conn:
-            await conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS users (
-                    id BIGINT PRIMARY KEY,
-                    username TEXT,
-                    rank TEXT DEFAULT 'nobody'
-                )
-                """
-            )
-
-    @listener.command("sudo", filters=listener.rank_limit("owner"))
+    @handler(["sudo"], filters=rank_limit("owner"))
     async def sudo(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         msg = update.effective_message
-        update.effective_user
 
         args = context.args or []
         sub = args[0].lower() if args else "list"

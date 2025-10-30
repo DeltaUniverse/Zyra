@@ -1,4 +1,3 @@
-import asyncio
 from typing import Any, Optional
 
 from telegram import Update
@@ -57,35 +56,15 @@ class EventDispatcher:
             evt = getattr(base, "_evt", None)
             flt = getattr(base, "_flt", None)
             prio = getattr(base, "_prio", 100)
-            cmds = getattr(base, "_cmds", None)
+            getattr(base, "_cmds", None)
 
-            # Auto-detect hooks from on_* methods (backwards compat)
-            if evt is None and name.startswith("on_"):
+            if name.startswith("on_"):
                 hook = name[3:]
                 if hook in _HOOKS:
-                    evt = hook
-                    flt = None
+                    self.add_listener(fn, hook, filters=None, priority=prio)
+                    continue
 
-            # Auto-detect commands from cmd_* methods (backwards compat)
-            if evt is None and name.startswith("cmd_"):
-                primary = name[4:]
-                if primary:
-                    evt = "command"
-                    seen = set()
-                    merged = []
-                    for c in (primary,) + (cmds or ()):
-                        k = c.lower()
-                        if k not in seen:
-                            seen.add(k)
-                            merged.append(c)
-
-                    cmds = tuple(merged)
-                    setattr(base, "_cmds", cmds)
-
-            if evt:
-                setattr(base, "_evt", evt)
-                setattr(base, "_flt", flt)
-                setattr(base, "_prio", prio)
+            if evt and evt not in _HOOKS:
                 self.add_listener(fn, evt, filters=flt, priority=prio)
 
     def unregister_module(self, mod: Any) -> None:
@@ -142,14 +121,6 @@ class EventDispatcher:
         except Exception as e:
             self.log.exception(f"Error in listener {func.__name__}: {e}")
 
-    async def _gather_with_logging(self, tasks: list, context_name: str) -> None:
-        if not tasks:
-            return
-
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        for exc in (r for r in results if isinstance(r, Exception)):
-            self.log.exception(f"Error in {context_name}", exc_info=exc)
-
     async def _dispatch_command(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
     ) -> bool:
@@ -166,7 +137,7 @@ class EventDispatcher:
             return False
 
         cmd_lower = cmd.lower()
-        tasks = []
+        handled = False
 
         for li in bucket:
             if not await li.check(update, context):
@@ -178,13 +149,10 @@ class EventDispatcher:
                 if cmd_lower not in cmds_lower:
                     continue
 
-            tasks.append(self._invoke(li.func, update, context))
+            await self._invoke(li.func, update, context)
+            handled = True
 
-        if tasks:
-            await self._gather_with_logging(tasks, "command dispatch")
-            return True
-
-        return False
+        return handled
 
     async def dispatch(
         self,
@@ -201,14 +169,9 @@ class EventDispatcher:
         if not bucket:
             return
 
-        tasks = [
-            self._invoke(li.func, update, context)
-            for li in bucket
-            if li.event in _HOOKS or await li.check(update, context)
-        ]
-
-        if tasks and wait:
-            await self._gather_with_logging(tasks, f"event '{event}'")
+        for li in bucket:
+            if li.event in _HOOKS or await li.check(update, context):
+                await self._invoke(li.func, update, context)
 
     async def emit_hook(
         self,
@@ -220,8 +183,8 @@ class EventDispatcher:
         if not bucket:
             return
 
-        tasks = [self._invoke(li.func, update, context) for li in bucket]
-        await self._gather_with_logging(tasks, f"hook '{hook.value}'")
+        for li in bucket:
+            await self._invoke(li.func, update, context)
 
     async def dispatch_event(
         self,

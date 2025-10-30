@@ -1,4 +1,3 @@
-# users.py  (PTB version)
 from typing import ClassVar, Optional
 
 from telegram import Update, User
@@ -29,18 +28,18 @@ class Users(module.Module):
             return
 
         async with self.bot.db.acquire() as conn:
-            await conn.execute(
-                """
-                INSERT INTO users (id, username)
-                VALUES ($1, $2)
-                ON CONFLICT (id) DO UPDATE
-                SET username = COALESCE(EXCLUDED.username, users.username)
-                """,
-                u.id,
-                u.username,
-            )
+            row = await conn.fetchrow("SELECT username FROM users WHERE id = $1", u.id)
+            if row:
+                if row["username"] != u.username:
+                    await conn.execute(
+                        "UPDATE users SET username = $1 WHERE id = $2", u.username, u.id
+                    )
+            else:
+                await conn.execute(
+                    "INSERT INTO users (id, username) VALUES ($1, $2)", u.id, u.username
+                )
 
-    @handler("message")
+    @handler("message", priority=110)
     async def on_message(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
     ) -> None:

@@ -8,7 +8,7 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from .. import module
-from ..listener import command
+from ..listener import handler
 
 
 class MemoryMonitor(module.Module):
@@ -17,7 +17,7 @@ class MemoryMonitor(module.Module):
     async def on_load(self) -> None:
         self.process = psutil.Process(os.getpid())
 
-    @command(("memory", "mem", "ram"))
+    @handler(["memory", "mem", "ram"])
     async def memory(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         msg = update.effective_message
         if not msg:
@@ -47,7 +47,7 @@ class MemoryMonitor(module.Module):
 
         await msg.reply_text(text, parse_mode="HTML")
 
-    @command("gc")
+    @handler(["gc"])
     async def gc(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         msg = update.effective_message
         if not msg:

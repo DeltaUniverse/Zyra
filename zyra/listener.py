@@ -1,3 +1,4 @@
+import inspect
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Awaitable, Callable, Iterable, Optional, Sequence, Union
@@ -31,75 +32,54 @@ class Listener:
         if flt is None:
             return True
 
-        if isinstance(flt, (list, tuple, set)):
-            for f in flt:
-                sub = Listener(
-                    self.priority, self.event, self.func, f, self.commands, self.self
-                )
-                if not await sub.check(update, context):
-                    return False
-
-            return True
-
-        if callable(flt):
-            res = None
-            try:
-                res = flt(update, context, self.self)
-            except TypeError:
-                res = flt(update, context)
-
-            if hasattr(res, "__await__"):
-                res = await res
-
-            if isinstance(res, (list, tuple, set)):
-                for sub in res:
-                    sub_li = Listener(
-                        self.priority,
-                        self.event,
-                        self.func,
-                        sub,
-                        self.commands,
-                        self.self,
-                    )
-                    if not await sub_li.check(update, context):
+        async def _eval(f) -> bool:
+            if isinstance(f, (list, tuple, set)):
+                for sub in f:
+                    if not await _eval(sub):
                         return False
 
                 return True
 
-            return bool(res)
+            if callable(f):
+                try:
+                    res = f(update, context, self.self)
+                except TypeError:
+                    res = f(update, context)
 
-        return bool(flt)
+                if inspect.isawaitable(res):
+                    res = await res
+
+                if isinstance(res, (list, tuple, set)):
+                    return await _eval(res)
+
+                return bool(res)
+
+            return bool(f)
+
+        return await _eval(flt)
 
 
 def handler(
-    event: str, *, filters: Optional[Filter] = None, priority: int = 100
-) -> Callable[[Func], Func]:
-    def wrap(fn: Func) -> Func:
-        setattr(fn, "_evt", event)
-        setattr(fn, "_flt", None if event in _HOOKS else filters)
-        setattr(fn, "_prio", priority)
-        return fn
-
-    return wrap
-
-
-def command(
-    names: Union[str, Sequence[str], None] = None,
+    event: Union[str, Sequence[str]],
     *,
     filters: Optional[Filter] = None,
     priority: int = 100,
 ) -> Callable[[Func], Func]:
-    cmds = None
-    if names is not None:
-        cmds = (names,) if isinstance(names, str) else tuple(names)
-
     def wrap(fn: Func) -> Func:
-        setattr(fn, "_evt", "command")
+        if isinstance(event, (list, tuple, set)):
+            setattr(fn, "_evt", "command")
+            setattr(fn, "_cmds", tuple(event))
+            setattr(fn, "_flt", filters)
+            setattr(fn, "_prio", priority)
+            return fn
+
+        ev = str(event)
+        if ev in _HOOKS:
+            raise ValueError("Hooks must be defined as on_<hook>() without decorators")
+
+        setattr(fn, "_evt", ev)
         setattr(fn, "_flt", filters)
         setattr(fn, "_prio", priority)
-        if cmds is not None:
-            setattr(fn, "_cmds", cmds)
-
         return fn
 
     return wrap
@@ -112,7 +92,7 @@ def rank_limit(rank: str | None = None):
             return False
 
         r = (rank or "").strip().lower()
-        if r == "" or r is None:
+        if not r:
             return True
 
         if r == "owner":
@@ -121,7 +101,6 @@ def rank_limit(rank: str | None = None):
         if r == "sudo":
             owner_id = getattr(self, "owner_id", None)
             sudoers = getattr(self, "sudoers", set())
-
             return u.id == owner_id or u.id in sudoers
 
         if r == "nobody":
