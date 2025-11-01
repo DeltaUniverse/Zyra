@@ -151,12 +151,7 @@ class Users(module.Module):
     ) -> None:
         q = update.callback_query
         data = (q.data or "").split(":")
-        if not data:
-            await q.answer()
-            return
-
-        if data[0] != "users":
-            await q.answer()
+        if not data or data[0] != "users":
             return
 
         if len(data) >= 2 and data[1] == "refresh":
