@@ -5,24 +5,26 @@ import html
 import inspect
 import io
 import os
-from typing import Any, ClassVar, Dict
+import sys
+from typing import Any, Dict
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Message, Update
 from telegram.ext import ContextTypes
 
-from .. import module
-from ..listener import handler
+from ..core.module_manager import ModuleBase
+from ..decorators import handler, parse_callback_data, requires_owner
 from ..util import time
 
+PYTHON_312_PLUS = sys.version_info >= (3, 12)
 
-class Exec(module.Module):
-    name: ClassVar[str] = "exec"
-    _tasks: Dict[int, asyncio.Task]
+
+class Exec(ModuleBase):
+    name = "exec"
 
     async def on_load(self) -> None:
-        self._tasks = {}
+        self._tasks: Dict[int, asyncio.Task] = {}
 
-    @handler(["exec", "e"], priority=100)
+    @handler(["exec", "e"], filters=requires_owner, priority=100)
     async def on_command(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
     ) -> None:
@@ -30,14 +32,9 @@ class Exec(module.Module):
         if not msg:
             return
 
-        if not self._is_owner(update):
-            return
-
         text = (msg.text or msg.caption or "").strip()
-        if not text:
-            return
+        code = self._extract_code(msg, text)
 
-        code = self._extract_code_after_command(msg, text)
         sent = await msg.reply_text(
             "<code>...</code>",
             reply_markup=self._buttons(running=True),
@@ -45,6 +42,7 @@ class Exec(module.Module):
             do_quote=True,
             allow_sending_without_reply=True,
         )
+
         if not code:
             with contextlib.suppress(Exception):
                 await sent.edit_text(
@@ -54,11 +52,11 @@ class Exec(module.Module):
             return
 
         task = asyncio.create_task(
-            self._do_exec(sent, code, {"update": update, "context": context})
+            self._execute(sent, code, {"update": update, "context": context})
         )
         self._tasks[sent.id] = task
 
-    @handler("callback_query")
+    @handler("callback_query", filters=requires_owner)
     async def on_callback_query(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
     ) -> None:
@@ -66,87 +64,87 @@ class Exec(module.Module):
         if not cq:
             return
 
-        if cq.from_user.id != self.bot.owner_id:
+        parts = parse_callback_data(cq.data or "", "exec")
+        if not parts:
             return
 
-        data = cq.data or ""
-        if not data.startswith("exec:"):
-            return
-
+        action = parts[0] if parts else None
         host_msg = cq.message
         if not host_msg:
             return
 
-        if data == "exec:del":
-            replied = host_msg.reply_to_message
-            if replied:
-                with contextlib.suppress(Exception):
-                    await replied.delete()
-
-            with contextlib.suppress(Exception):
-                await host_msg.delete()
-
-            task = self._tasks.pop(host_msg.id, None)
-            if task and not task.done():
-                task.cancel()
-
+        if action == "del":
+            await self._handle_delete(host_msg)
             return
 
-        if data == "exec:cancel":
-            task = self._tasks.pop(host_msg.id, None)
-            if task and not task.done():
-                task.cancel()
+        if action == "cancel":
+            await self._handle_cancel(host_msg)
+            return
 
+        if action == "run":
+            await self._handle_run(host_msg, update, context)
+            return
+
+    async def _handle_delete(self, host_msg: Message) -> None:
+        replied = host_msg.reply_to_message
+        if replied:
             with contextlib.suppress(Exception):
-                await cq.edit_message_text(
-                    "<b>Cancelling…</b>",
+                await replied.delete()
+
+        with contextlib.suppress(Exception):
+            await host_msg.delete()
+
+        task = self._tasks.pop(host_msg.id, None)
+        if task and not task.done():
+            task.cancel()
+
+    async def _handle_cancel(self, host_msg: Message) -> None:
+        task = self._tasks.pop(host_msg.id, None)
+        if task and not task.done():
+            task.cancel()
+
+        with contextlib.suppress(Exception):
+            await host_msg.edit_text(
+                "<b>Cancelling…</b>",
+                reply_markup=self._buttons(running=False),
+                parse_mode="HTML",
+            )
+
+    async def _handle_run(
+        self, host_msg: Message, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
+        code = ""
+        if host_msg.reply_to_message:
+            raw = (
+                host_msg.reply_to_message.text
+                or host_msg.reply_to_message.caption
+                or ""
+            )
+            code = self._strip_command(raw).strip()
+
+        if not code:
+            with contextlib.suppress(Exception):
+                await host_msg.edit_text(
+                    "<code>Message Gone!</code>",
                     reply_markup=self._buttons(running=False),
                     parse_mode="HTML",
                 )
 
             return
 
-        if data == "exec:run":
-            raw = ""
-            if host_msg.reply_to_message:
-                raw = (
-                    host_msg.reply_to_message.text
-                    or host_msg.reply_to_message.caption
-                    or ""
-                )
-
-            code = self._strip_invoker(raw).strip()
-            if not code:
-                with contextlib.suppress(Exception):
-                    await cq.edit_message_text(
-                        "<code>Message Gone!</code>",
-                        reply_markup=self._buttons(running=False),
-                        parse_mode="HTML",
-                    )
-
-                return
-
-            with contextlib.suppress(Exception):
-                await cq.edit_message_text(
-                    "<code>...</code>",
-                    reply_markup=self._buttons(running=True),
-                    parse_mode="HTML",
-                )
-
-            task = asyncio.create_task(
-                self._do_exec(host_msg, code, {"update": update, "context": context})
+        with contextlib.suppress(Exception):
+            await host_msg.edit_text(
+                "<code>...</code>",
+                reply_markup=self._buttons(running=True),
+                parse_mode="HTML",
             )
-            self._tasks[host_msg.id] = task
 
-    def _is_owner(self, update: Update) -> bool:
-        owner_id = getattr(self.bot, "owner_id", None)
-        uid_msg = getattr(
-            getattr(update.effective_message, "from_user", None), "id", None
+        task = asyncio.create_task(
+            self._execute(host_msg, code, {"update": update, "context": context})
         )
-        uid_cq = getattr(getattr(update.callback_query, "from_user", None), "id", None)
-        return (uid_msg or uid_cq) == owner_id
+        self._tasks[host_msg.id] = task
 
-    def _strip_invoker(self, text: str) -> str:
+    def _strip_command(self, text: str) -> str:
         if not text:
             return ""
 
@@ -155,7 +153,7 @@ class Exec(module.Module):
 
         return text
 
-    def _extract_code_after_command(self, msg: Message, text: str) -> str:
+    def _extract_code(self, msg: Message, text: str) -> str:
         parts = text.split(maxsplit=1)
         if len(parts) == 2:
             return parts[1]
@@ -167,15 +165,6 @@ class Exec(module.Module):
 
         return ""
 
-    def _extract_code_from_message(self, msg: Message, text: str) -> str:
-        code = self._strip_invoker(text).strip()
-        if not code and msg.reply_to_message:
-            code = (
-                msg.reply_to_message.text or msg.reply_to_message.caption or ""
-            ).strip()
-
-        return code
-
     def _buttons(self, *, running: bool) -> InlineKeyboardMarkup:
         row = [InlineKeyboardButton("Run", callback_data="exec:run")]
         if running:
@@ -185,7 +174,7 @@ class Exec(module.Module):
             [row, [InlineKeyboardButton("Del", callback_data="exec:del")]]
         )
 
-    async def _do_exec(
+    async def _execute(
         self, sent: Message, code: str, extra_args: Dict[str, Any]
     ) -> None:
         start_us = time.usec()
@@ -209,7 +198,7 @@ class Exec(module.Module):
 
             raise
         finally:
-            self._tasks.pop(getattr(sent, "id", None), None)
+            self._tasks.pop(sent.id, None)
 
     async def _run_code(self, code: str, extra_args: Dict[str, Any]) -> str:
         args: Dict[str, Any] = {
@@ -221,10 +210,11 @@ class Exec(module.Module):
             "asyncio": asyncio,
             "html": html,
             "os": os,
-            "db": self.bot.db,
+            "db": self.bot.db.pool,
         }
         args.update(extra_args)
         args = dict(sorted(args.items()))
+
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             try:
@@ -244,36 +234,29 @@ class Exec(module.Module):
             node.body[-1] = ast.Return(value=node.body[-1].value)
 
         fn_name = "_zyra_aexec"
+        args_ast = ast.arguments(
+            posonlyargs=[],
+            args=[ast.arg(arg=k) for k in env.keys()],
+            vararg=None,
+            kwonlyargs=[],
+            kw_defaults=[],
+            kwarg=None,
+            defaults=[],
+        )
 
-        try:
+        if PYTHON_312_PLUS:
             fn = ast.AsyncFunctionDef(
                 name=fn_name,
-                args=ast.arguments(
-                    posonlyargs=[],
-                    args=[ast.arg(arg=k) for k in env.keys()],
-                    vararg=None,
-                    kwonlyargs=[],
-                    kw_defaults=[],
-                    kwarg=None,
-                    defaults=[],
-                ),
+                args=args_ast,
                 body=node.body,
                 decorator_list=[],
                 returns=None,
                 type_params=[],
             )
-        except TypeError:
+        else:
             fn = ast.AsyncFunctionDef(
                 name=fn_name,
-                args=ast.arguments(
-                    posonlyargs=[],
-                    args=[ast.arg(arg=k) for k in env.keys()],
-                    vararg=None,
-                    kwonlyargs=[],
-                    kw_defaults=[],
-                    kwarg=None,
-                    defaults=[],
-                ),
+                args=args_ast,
                 body=node.body,
                 decorator_list=[],
                 returns=None,

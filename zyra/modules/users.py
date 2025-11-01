@@ -1,15 +1,14 @@
-from typing import ClassVar, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, User
 from telegram.ext import ContextTypes
 
-from .. import module
-from ..listener import handler, rank_limit
+from ..core.module_manager import ModuleBase
+from ..decorators import handler, parse_callback_data, requires_sudo
 
 
-class Users(module.Module):
-    name: ClassVar[str] = "users"
-    _ready: bool = False
+class Users(ModuleBase):
+    name = "users"
 
     async def on_load(self) -> None:
         async with self.bot.db.acquire() as conn:
@@ -23,27 +22,33 @@ class Users(module.Module):
                 """
             )
 
-    async def _seen(self, u: Optional[User]) -> None:
-        if not u or u.id == self.bot.owner_id:
+    async def _update_user(self, user: Optional[User]) -> None:
+        if not user or user.id == self.bot.owner_id:
             return
 
         async with self.bot.db.acquire() as conn:
-            row = await conn.fetchrow("SELECT username FROM users WHERE id = $1", u.id)
+            row = await conn.fetchrow(
+                "SELECT username FROM users WHERE id = $1", user.id
+            )
             if row:
-                if row["username"] != u.username:
+                if row["username"] != user.username:
                     await conn.execute(
-                        "UPDATE users SET username = $1 WHERE id = $2", u.username, u.id
+                        "UPDATE users SET username = $1 WHERE id = $2",
+                        user.username,
+                        user.id,
                     )
             else:
                 await conn.execute(
-                    "INSERT INTO users (id, username) VALUES ($1, $2)", u.id, u.username
+                    "INSERT INTO users (id, username) VALUES ($1, $2)",
+                    user.id,
+                    user.username,
                 )
 
     @handler("message", priority=110)
     async def on_message(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
     ) -> None:
-        await self._seen(update.effective_user)
+        await self._update_user(update.effective_user)
 
     async def _render_userlist(
         self, limit: int, offset: int
@@ -85,34 +90,29 @@ class Users(module.Module):
             )
             return f"{i}. {mention} <code>{r['id']}</code>"
 
-        lines: List[str] = []
-        lines.append("<b>👥 User List</b>")
-        lines.append(
-            f"Total: <b>{total}</b> • Showing: <b>{len(rows)}</b> • Offset: <b>{offset}</b>"
-        )
-        lines.append("")
+        lines: List[str] = [
+            "<b>👥 User List</b>",
+            f"Total: <b>{total}</b> • Showing: <b>{len(rows)}</b> • Offset: <b>{offset}</b>",
+            "",
+        ]
 
         if groups["sudoer"]:
             lines.append("🛡️ <b>Sudoers</b>")
-            for idx, r in enumerate(groups["sudoer"], start=1):
-                lines.append(fmt_user(idx, r))
-
+            lines.extend(fmt_user(i, r) for i, r in enumerate(groups["sudoer"], 1))
             lines.append("")
 
         if others:
             lines.append("🏷️ <b>Other Ranks</b>")
             for rank_name in sorted(others.keys()):
                 lines.append(f"• <b>{rank_name}</b> (<i>{len(others[rank_name])}</i>)")
-                for idx, r in enumerate(others[rank_name], start=1):
-                    lines.append("   " + fmt_user(idx, r))
-
+                lines.extend(
+                    f"   {fmt_user(i, r)}" for i, r in enumerate(others[rank_name], 1)
+                )
                 lines.append("")
 
         if groups["nobody"]:
             lines.append("👤 <b>Nobody</b>")
-            for idx, r in enumerate(groups["nobody"], start=1):
-                lines.append(fmt_user(idx, r))
-
+            lines.extend(fmt_user(i, r) for i, r in enumerate(groups["nobody"], 1))
             lines.append("")
 
         if not rows:
@@ -130,14 +130,15 @@ class Users(module.Module):
         )
         return "\n".join(lines), kb
 
-    @handler(["users", "userlist"], filters=rank_limit("sudo"))
+    @handler(["users", "userlist"], filters=requires_sudo)
     async def cmd_userlist(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
     ) -> None:
         msg = update.effective_message
-        args = getattr(context, "args", [])
+        args = context.args or []
+
         try:
-            limit = max(1, min(200, int(args[0]))) if len(args) > 0 else 50
+            limit = max(1, min(200, int(args[0]))) if args else 50
             offset = max(0, int(args[1])) if len(args) > 1 else 0
         except ValueError:
             limit, offset = 50, 0
@@ -145,21 +146,23 @@ class Users(module.Module):
         text, kb = await self._render_userlist(limit, offset)
         await msg.reply_text(text, disable_web_page_preview=True, reply_markup=kb)
 
-    @handler("callback_query", filters=rank_limit("sudo"))
+    @handler("callback_query", filters=requires_sudo)
     async def on_callback(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
     ) -> None:
         q = update.callback_query
-        data = (q.data or "").split(":")
-        if not data or data[0] != "users":
+        parts = parse_callback_data(q.data or "", "users")
+        if not parts:
             return
 
-        if len(data) >= 2 and data[1] == "refresh":
+        action = parts[0] if parts else None
+
+        if action == "refresh":
             await q.edit_message_text("<i>Refreshing...</i>")
             try:
-                limit = int(data[2]) if len(data) > 2 else 50
-                offset = int(data[3]) if len(data) > 3 else 0
-            except ValueError:
+                limit = int(parts[1]) if len(parts) > 1 else 50
+                offset = int(parts[2]) if len(parts) > 2 else 0
+            except (ValueError, IndexError):
                 limit, offset = 50, 0
 
             text, kb = await self._render_userlist(limit, offset)
@@ -167,8 +170,7 @@ class Users(module.Module):
                 text, disable_web_page_preview=True, reply_markup=kb
             )
             await q.answer("Refreshed")
-            return
 
-        if len(data) >= 2 and data[1] == "close":
+        elif action == "close":
             await q.message.delete()
             await q.answer("Closed")

@@ -1,41 +1,33 @@
-from typing import TYPE_CHECKING, Any
-
 import asyncpg
 from asyncpg import Pool
 
-from .base import ZyraBase
 
-if TYPE_CHECKING:
-    from .bot import Zyra
+class Database:
+    def __init__(self, dsn: str):
+        self.dsn = dsn
+        self.pool: Pool = None
 
+    async def connect(self) -> None:
+        if self.pool is not None:
+            return
 
-class DatabaseProvider(ZyraBase):
+        self.pool = await asyncpg.create_pool(
+            dsn=self.dsn,
+            min_size=2,
+            max_size=10,
+            command_timeout=20.0,
+            max_inactive_connection_lifetime=300.0,
+            max_cached_statement_lifetime=300.0,
+            server_settings={"application_name": "Zyra", "jit": "off"},
+        )
 
-    db: Pool
+    async def close(self) -> None:
+        if self.pool is not None:
+            await self.pool.close()
+            self.pool = None
 
-    def __init__(self: "Zyra", **kwargs: Any) -> None:
-        dsn = self.config.get("bot", {}).get("db_uri")
-        if not dsn:
-            raise SystemExit("Missing database.db_uri in config")
+    def __getattr__(self, name: str):
+        if self.pool is None:
+            raise RuntimeError("Database not connected")
 
-        self._db_dsn = dsn
-        self.db = None
-        super().__init__(**kwargs)
-
-    async def setup_database(self: "Zyra") -> None:
-        if self.db is None:
-            self.db = await asyncpg.create_pool(
-                dsn=self._db_dsn,
-                timeout=5,
-                min_size=2,
-                max_size=10,
-                command_timeout=20.0,
-                max_inactive_connection_lifetime=300.0,
-                max_cached_statement_lifetime=300.0,
-                server_settings={"application_name": "Zyra", "jit": "off"},
-            )
-
-    async def close_database(self: "Zyra") -> None:
-        if self.db is not None:
-            await self.db.close()
-            self.db = None
+        return getattr(self.pool, name)

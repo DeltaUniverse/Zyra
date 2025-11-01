@@ -1,19 +1,18 @@
-from typing import ClassVar, Optional
+from typing import Optional
 
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from .. import module
-from ..listener import handler, rank_limit
+from ..core.module_manager import ModuleBase
+from ..decorators import handler, requires_owner
 
 
-class Operators(module.Module):
-    name: ClassVar[str] = "operators"
+class Operators(ModuleBase):
+    name = "operators"
 
-    @handler(["sudo"], filters=rank_limit("owner"))
+    @handler(["sudo"], filters=requires_owner)
     async def sudo(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         msg = update.effective_message
-
         args = context.args or []
         sub = args[0].lower() if args else "list"
 
@@ -22,6 +21,7 @@ class Operators(module.Module):
                 rows = await conn.fetch(
                     "SELECT id, username FROM users WHERE rank='sudoer' ORDER BY id"
                 )
+
             if not rows:
                 await msg.reply_text("⚙️ <b>No sudoers found.</b>")
                 return

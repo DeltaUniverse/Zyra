@@ -1,18 +1,17 @@
 import asyncio
 import gc
 import os
-from typing import ClassVar
 
 import psutil
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from .. import module
-from ..listener import handler
+from ..core.module_manager import ModuleBase
+from ..decorators import handler, requires_owner
 
 
-class MemoryMonitor(module.Module):
-    name: ClassVar[str] = "Memory"
+class MemoryMonitor(ModuleBase):
+    name = "Memory"
 
     async def on_load(self) -> None:
         self.process = psutil.Process(os.getpid())
@@ -47,13 +46,12 @@ class MemoryMonitor(module.Module):
 
         await msg.reply_text(text, parse_mode="HTML")
 
-    @handler(["gc"])
-    async def gc(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    @handler(["gc"], filters=requires_owner)
+    async def gc_collect(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
         msg = update.effective_message
         if not msg:
-            return
-
-        if msg.from_user.id != self.bot.owner_id:
             return
 
         before = self.process.memory_info().rss / 1024 / 1024

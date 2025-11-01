@@ -5,29 +5,33 @@ from typing import Any, MutableMapping
 
 import aiorun
 
-from .core import Zyra
+from .core.bot import Zyra
 
 log = logging.getLogger("Loader")
 aiorun.logger.disabled = True
 
 
-def main(config: MutableMapping[str, Any]) -> None:
+def run_bot(config: MutableMapping[str, Any]) -> None:
     if sys.platform == "win32":
         policy = asyncio.WindowsProactorEventLoopPolicy()
         asyncio.set_event_loop_policy(policy)
     else:
         try:
             import uvloop
-        except ImportError:
-            pass
-        else:
+
             uvloop.install()
             log.info("Using uvloop event loop")
+        except ImportError:
+            pass
 
     log.info("Initializing Zyra bot")
     loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
     try:
-        aiorun.run(Zyra.create_and_run(config, loop=loop), loop=loop)
+        aiorun.run(Zyra.create_and_run(config), loop=loop)
+    except KeyboardInterrupt:
+        log.info("Received keyboard interrupt")
     except Exception as e:
-        log.error(f"Failed to start Zyra: {e}")
+        log.error(f"Failed to start Zyra: {e}", exc_info=True)
         raise
