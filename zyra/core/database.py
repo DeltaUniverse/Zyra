@@ -26,6 +26,7 @@ class DatabaseProvider(ZyraBase):
         if self.db is None:
             self.db = await asyncpg.create_pool(
                 dsn=self._db_dsn,
+                timeout=5,
                 min_size=2,
                 max_size=10,
                 command_timeout=20.0,
