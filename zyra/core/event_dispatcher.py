@@ -56,16 +56,27 @@ class EventDispatcher:
             evt = getattr(base, "_evt", None)
             flt = getattr(base, "_flt", None)
             prio = getattr(base, "_prio", 100)
-            getattr(base, "_cmds", None)
+            cmds = getattr(base, "_cmds", None)
 
+            # hooks: on_load(), on_start(), etc.
             if name.startswith("on_"):
                 hook = name[3:]
                 if hook in _HOOKS:
                     self.add_listener(fn, hook, filters=None, priority=prio)
                     continue
 
-            if evt and evt not in _HOOKS:
+            # decorator handlers
+            if evt:
+                # prevent decorator("start") clashing with on_start hook
+                if evt in _HOOKS and evt != "command":
+                    continue
+
                 self.add_listener(fn, evt, filters=flt, priority=prio)
+                if evt == "command" and cmds:
+                    li = self.listeners[evt][-1]
+                    li.commands = tuple(cmds)
+
+                continue
 
     def unregister_module(self, mod: Any) -> None:
         mod_name = getattr(mod, "__name__", None)

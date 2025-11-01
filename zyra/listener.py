@@ -66,6 +66,7 @@ def handler(
     priority: int = 100,
 ) -> Callable[[Func], Func]:
     def wrap(fn: Func) -> Func:
+
         if isinstance(event, (list, tuple, set)):
             setattr(fn, "_evt", "command")
             setattr(fn, "_cmds", tuple(event))
@@ -73,7 +74,15 @@ def handler(
             setattr(fn, "_prio", priority)
             return fn
 
-        ev = str(event)
+        ev = str(event).strip().lower()
+
+        if ev == "start":
+            setattr(fn, "_evt", "command")
+            setattr(fn, "_cmds", ("start",))
+            setattr(fn, "_flt", filters)
+            setattr(fn, "_prio", priority)
+            return fn
+
         if ev in _HOOKS:
             raise ValueError("Hooks must be defined as on_<hook>() without decorators")
 

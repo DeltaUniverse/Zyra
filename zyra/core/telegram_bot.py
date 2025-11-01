@@ -91,8 +91,15 @@ class TelegramBot(ZyraBase):
         self.application = builder.build()
         self.client = self.application.bot
         self.owner_id = self.config["rank"]["owner_id"]
-        sudo = await self.db.fetch("SELECT id FROM users WHERE rank = 'sudoer';")
-        self.sudoers = {int(r["id"]) for r in sudo}
+
+        # safe load sudoers table
+        try:
+            sudo = await self.db.fetch("SELECT id FROM users WHERE rank = 'sudoer';")
+            self.sudoers = {int(r["id"]) for r in sudo}
+        except Exception as e:
+            self.sudoers = set()
+            self.log.warning("Skipping sudoers load: %s", e)
+
         self.application.add_error_handler(
             error.make_error_handler(
                 self.owner_id, logger=self.log, redact=self.redact_message
