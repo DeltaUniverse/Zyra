@@ -7,7 +7,7 @@ def handler(
     event: str | Sequence[str] | Events,
     *,
     filters: Callable = None,
-    priority: int = 100
+    priority: int = 100,
 ) -> Callable:
     def wrap(fn: Callable) -> Callable:
         if isinstance(event, (list, tuple, set)):
@@ -37,15 +37,12 @@ def handler(
     return wrap
 
 
-def requires_owner(update, context, bot):
+def owner_only(update, context, bot):
     user = getattr(update, "effective_user", None)
-    if not user:
-        return False
-
-    return user.id == bot.owner_id
+    return user and user.id == bot.owner_id
 
 
-def requires_sudo(update, context, bot):
+def sudo_only(update, context, bot):
     user = getattr(update, "effective_user", None)
     if not user:
         return False
@@ -53,9 +50,29 @@ def requires_sudo(update, context, bot):
     return user.id == bot.owner_id or user.id in bot.sudoers
 
 
-def parse_callback_data(data: str, prefix: str) -> list[str] | None:
-    if not data:
-        return None
+def rank_filter(rank: str):
+    def check(update, context, bot):
+        user = getattr(update, "effective_user", None)
+        if not user:
+            return False
 
-    parts = data.split(":")
-    return parts[1:] if parts and parts[0] == prefix else None
+        r = rank.strip().lower()
+        if r == "owner":
+            return user.id == bot.owner_id
+
+        if r == "sudo":
+            return user.id == bot.owner_id or user.id in bot.sudoers
+
+        if r == "nobody":
+            return False
+
+        return False
+
+    return check
+
+
+def parse_callback(data: str, prefix: str) -> list[str]:
+    if not data or not data.startswith(f"{prefix}:"):
+        return []
+
+    return data.split(":")[1:]

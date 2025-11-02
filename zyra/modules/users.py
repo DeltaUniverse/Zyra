@@ -3,11 +3,11 @@ from typing import Dict, List, Optional, Tuple
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, User
 from telegram.ext import ContextTypes
 
-from ..core.module_manager import ModuleBase
-from ..decorators import handler, parse_callback_data, requires_sudo
+from ..core.module import Module
+from ..decorators import handler, parse_callback, sudo_only
 
 
-class Users(ModuleBase):
+class Users(Module):
     name = "users"
 
     async def on_load(self) -> None:
@@ -130,7 +130,7 @@ class Users(ModuleBase):
         )
         return "\n".join(lines), kb
 
-    @handler(["users", "userlist"], filters=requires_sudo)
+    @handler(["users", "userlist"], filters=sudo_only)
     async def cmd_userlist(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
     ) -> None:
@@ -146,12 +146,12 @@ class Users(ModuleBase):
         text, kb = await self._render_userlist(limit, offset)
         await msg.reply_text(text, disable_web_page_preview=True, reply_markup=kb)
 
-    @handler("callback_query", filters=requires_sudo)
+    @handler("callback_query", filters=sudo_only)
     async def on_callback(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
     ) -> None:
         q = update.callback_query
-        parts = parse_callback_data(q.data or "", "users")
+        parts = parse_callback(q.data or "", "users")
         if not parts:
             return
 

@@ -18,7 +18,7 @@ from telegram.ext import (
     filters,
 )
 
-from .event_bus import EventBus
+from .bus import EventBus
 from .events import Events
 
 

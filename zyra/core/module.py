@@ -3,11 +3,11 @@ import logging
 from types import ModuleType
 from typing import Any, Iterable, Type
 
-from .event_bus import EventBus, unwrap_method
+from .bus import EventBus, unwrap_method
 from .events import Events, Hooks
 
 
-class ModuleBase:
+class Module:
     __slots__ = ("bot", "log", "comment")
     name: str = "Unnamed"
     disabled: bool = False
@@ -18,14 +18,14 @@ class ModuleBase:
         self.comment = None
 
 
-class ModuleManager:
-    def __init__(self, bot: Any, event_bus: EventBus):
+class Registry:
+    def __init__(self, bot: Any, bus: EventBus):
         self.bot = bot
-        self.event_bus = event_bus
-        self.modules: dict[str, ModuleBase] = {}
-        self.log = logging.getLogger("Loader")
+        self.bus = bus
+        self.modules: dict[str, Module] = {}
+        self.log = logging.getLogger("Registry")
 
-    def register_module_handlers(self, module: ModuleBase) -> None:
+    def _register_handlers(self, module: Module) -> None:
         cls = type(module)
         hook_values = {h.value for h in Hooks}
 
@@ -45,20 +45,20 @@ class ModuleManager:
             if name.startswith("on_"):
                 hook = name[3:]
                 if hook in hook_values:
-                    self.event_bus.add_listener(fn, hook, filters=None, priority=prio)
+                    self.bus.add_listener(fn, hook, filters=None, priority=prio)
                     continue
 
             if evt:
                 if evt in hook_values and evt != Events.COMMAND.value:
                     continue
 
-                self.event_bus.add_listener(fn, evt, filters=flt, priority=prio)
+                self.bus.add_listener(fn, evt, filters=flt, priority=prio)
 
                 if evt == Events.COMMAND.value and cmds:
-                    listeners = self.event_bus.listeners[evt]
+                    listeners = self.bus.listeners[evt]
                     listeners[-1].commands = tuple(cmds)
 
-    def load_module(self, cls: Type[ModuleBase], *, comment: str = None) -> None:
+    def load(self, cls: Type[Module], *, comment: str = None) -> None:
         self.log.info(f"▫️{comment or ''}{cls.name}")
 
         if cls.name in self.modules:
@@ -66,15 +66,15 @@ class ModuleManager:
 
         module = cls(self.bot)
         module.comment = comment
-        self.register_module_handlers(module)
+        self._register_handlers(module)
         self.modules[cls.name] = module
 
-    def unload_module(self, module: ModuleBase) -> None:
+    def unload(self, module: Module) -> None:
         self.log.info(f"Unloading module '{module.name}'")
-        self.event_bus.remove_listeners_for_module(module)
+        self.bus.remove_listeners(module)
         del self.modules[type(module).name]
 
-    def load_modules_from_package(
+    def load_package(
         self, submodules: Iterable[ModuleType], *, comment: str = None
     ) -> None:
         for module_mod in submodules:
@@ -82,14 +82,14 @@ class ModuleManager:
                 cls = getattr(module_mod, sym)
                 if (
                     not inspect.isclass(cls)
-                    or not issubclass(cls, ModuleBase)
-                    or cls is ModuleBase
+                    or not issubclass(cls, Module)
+                    or cls is Module
                     or getattr(cls, "disabled", False)
                 ):
                     continue
 
-                self.load_module(cls, comment=comment)
+                self.load(cls, comment=comment)
 
     def unload_all(self) -> None:
         for module in list(self.modules.values()):
-            self.unload_module(module)
+            self.unload(module)

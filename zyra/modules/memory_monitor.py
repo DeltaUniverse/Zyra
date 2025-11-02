@@ -6,11 +6,11 @@ import psutil
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from ..core.module_manager import ModuleBase
-from ..decorators import handler, requires_owner
+from ..core.module import Module
+from ..decorators import handler, owner_only
 
 
-class MemoryMonitor(ModuleBase):
+class Memory(Module):
     name = "Memory"
 
     async def on_load(self) -> None:
@@ -46,7 +46,7 @@ class MemoryMonitor(ModuleBase):
 
         await msg.reply_text(text, parse_mode="HTML")
 
-    @handler(["gc"], filters=requires_owner)
+    @handler(["gc"], filters=owner_only)
     async def gc_collect(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
     ) -> None:

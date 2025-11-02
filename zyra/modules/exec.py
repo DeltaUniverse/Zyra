@@ -11,20 +11,20 @@ from typing import Any, Dict
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Message, Update
 from telegram.ext import ContextTypes
 
-from ..core.module_manager import ModuleBase
-from ..decorators import handler, parse_callback_data, requires_owner
+from ..core.module import Module
+from ..decorators import handler, owner_only, parse_callback
 from ..util import time
 
 PYTHON_312_PLUS = sys.version_info >= (3, 12)
 
 
-class Exec(ModuleBase):
+class Exec(Module):
     name = "exec"
 
     async def on_load(self) -> None:
         self._tasks: Dict[int, asyncio.Task] = {}
 
-    @handler(["exec", "e"], filters=requires_owner, priority=100)
+    @handler(["exec", "e"], filters=owner_only, priority=100)
     async def on_command(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
     ) -> None:
@@ -56,7 +56,7 @@ class Exec(ModuleBase):
         )
         self._tasks[sent.id] = task
 
-    @handler("callback_query", filters=requires_owner)
+    @handler("callback_query", filters=owner_only)
     async def on_callback_query(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
     ) -> None:
@@ -64,7 +64,7 @@ class Exec(ModuleBase):
         if not cq:
             return
 
-        parts = parse_callback_data(cq.data or "", "exec")
+        parts = parse_callback(cq.data or "", "exec")
         if not parts:
             return
 

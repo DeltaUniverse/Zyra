@@ -3,14 +3,14 @@ from typing import Optional
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from ..core.module_manager import ModuleBase
-from ..decorators import handler, requires_owner
+from ..core.module import Module
+from ..decorators import handler, owner_only
 
 
-class Operators(ModuleBase):
+class Operators(Module):
     name = "operators"
 
-    @handler(["sudo"], filters=requires_owner)
+    @handler(["sudo"], filters=owner_only)
     async def sudo(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         msg = update.effective_message
         args = context.args or []

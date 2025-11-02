@@ -6,17 +6,17 @@ import httpx
 
 from .. import custom_modules, modules
 from ..util import time
+from .bus import EventBus
 from .database import Database
-from .event_bus import EventBus
 from .events import Hooks
-from .module_manager import ModuleManager
+from .module import Registry
 from .telegram_interface import TelegramInterface
 
 
 class Zyra:
     def __init__(self, config: Mapping[str, Any]):
         self.config = config
-        self.log = logging.getLogger("Bot")
+        self.log = logging.getLogger("Zyra")
         self.loop = asyncio.get_running_loop()
         self.stopping = False
         self.loaded = False
@@ -38,7 +38,7 @@ class Zyra:
 
         self.db = Database(db_uri)
         self.event_bus = EventBus(self, prefixes)
-        self.module_manager = ModuleManager(self, self.event_bus)
+        self.registry = Registry(self, self.event_bus)
         self.telegram = TelegramInterface(
             token=tg_config["token"],
             event_bus=self.event_bus,
@@ -80,10 +80,8 @@ class Zyra:
         await self.telegram.initialize(self.db.pool)
 
         self.log.info("Loading modules")
-        self.module_manager.load_modules_from_package(modules.submodules)
-        self.module_manager.load_modules_from_package(
-            custom_modules.submodules, comment="custom"
-        )
+        self.registry.load_package(modules.submodules)
+        self.registry.load_package(custom_modules.submodules, comment="custom")
         self.log.info("All modules loaded")
 
         await self.event_bus.emit_hook(Hooks.LOAD)
