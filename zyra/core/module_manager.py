@@ -23,7 +23,7 @@ class ModuleManager:
         self.bot = bot
         self.event_bus = event_bus
         self.modules: dict[str, ModuleBase] = {}
-        self.log = logging.getLogger("Module")
+        self.log = logging.getLogger("Loader")
 
     def register_module_handlers(self, module: ModuleBase) -> None:
         cls = type(module)
@@ -59,7 +59,7 @@ class ModuleManager:
                     listeners[-1].commands = tuple(cmds)
 
     def load_module(self, cls: Type[ModuleBase], *, comment: str = None) -> None:
-        self.log.info(f"•{comment or ''} {cls.name}")
+        self.log.info(f"▫️{comment or ''}{cls.name}")
 
         if cls.name in self.modules:
             raise ValueError(f"Module '{cls.name}' already loaded")
