@@ -1,22 +1,10 @@
 import logging
 import sys
-from pathlib import Path
-from typing import Any, MutableMapping
 
-import tomli
-
-
-def load_config(path: str = "config.toml") -> MutableMapping[str, Any]:
-    cfg_path = Path(path)
-    if not cfg_path.is_file():
-        raise FileNotFoundError(f"Config file not found: {cfg_path}")
-
-    with cfg_path.open("rb") as f:
-        return tomli.load(f)
+from .util.config import ZyraConfig
 
 
 def setup_logging(enable_color: bool = False) -> None:
-    import colorlog
 
     level = logging.INFO
     logging.root.setLevel(level)
@@ -28,6 +16,8 @@ def setup_logging(enable_color: bool = False) -> None:
     logfile.setLevel(level)
 
     if enable_color:
+        import colorlog
+
         stream_formatter = colorlog.ColoredFormatter(
             "  %(log_color)s%(levelname)-8s%(reset)s  |  %(name)-11s  |  %(log_color)s%(message)s%(reset)s"
         )
@@ -60,13 +50,13 @@ def main() -> None:
     log = logging.getLogger("Main")
 
     try:
-        config = load_config()
-    except FileNotFoundError as e:
-        print(f"Error: {e}")
+        config = ZyraConfig()
+    except SystemExit as e:
+        print(f"Configuration Error: {e}")
         sys.exit(1)
 
     if not config:
-        log.error("config.toml is empty or invalid")
+        log.error("Configuration is empty or invalid")
         sys.exit(1)
 
     setup_logging(config.get("bot", {}).get("colorlog", False))
