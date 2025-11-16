@@ -11,6 +11,8 @@ from ..decorators import handler, owner_only
 
 
 class Memory(Module):
+    """Monitors and reports memory usage."""
+
     name = "Memory"
 
     async def on_load(self) -> None:
@@ -22,28 +24,26 @@ class Memory(Module):
         if not msg:
             return
 
-        mem_info = self.process.memory_info()
-        mem_percent = self.process.memory_percent()
+        try:
+            mem_info = self.process.memory_info()
+            system = psutil.virtual_memory()
+        except psutil.Error as e:
+            await msg.reply_text(f"❌ psutil error: {e}")
+            return
 
         rss_mb = mem_info.rss / 1024 / 1024
         vms_mb = mem_info.vms / 1024 / 1024
 
-        system_mem = psutil.virtual_memory()
-        total_gb = system_mem.total / 1024 / 1024 / 1024
-        available_gb = system_mem.available / 1024 / 1024 / 1024
-        used_percent = system_mem.percent
-
         text = (
-            f"<b>Process Memory:</b>\n"
-            f"├ RSS: <code>{rss_mb:.2f} MB</code>\n"
-            f"├ VMS: <code>{vms_mb:.2f} MB</code>\n"
-            f"└ Usage: <code>{mem_percent:.1f}%</code>\n\n"
-            f"<b>System Memory:</b>\n"
-            f"├ Total: <code>{total_gb:.2f} GB</code>\n"
-            f"├ Available: <code>{available_gb:.2f} GB</code>\n"
-            f"└ Used: <code>{used_percent}%</code>"
+            f"<b>Process Memory</b>\n"
+            f"• RSS: <code>{rss_mb:,.2f} MB</code>\n"
+            f"• VMS: <code>{vms_mb:,.2f} MB</code>\n"
+            f"• Usage: <code>{self.process.memory_percent():.1f}%</code>\n\n"
+            f"<b>System Memory</b>\n"
+            f"• Total: <code>{system.total / 1024 ** 3:,.2f} GB</code>\n"
+            f"• Available: <code>{system.available / 1024 ** 3:,.2f} GB</code>\n"
+            f"• Used: <code>{system.percent}%</code>"
         )
-
         await msg.reply_text(text, parse_mode="HTML")
 
     @handler(["gc"], filters=owner_only)
@@ -55,19 +55,14 @@ class Memory(Module):
             return
 
         before = self.process.memory_info().rss / 1024 / 1024
-
         collected = gc.collect()
         await asyncio.sleep(0.1)
-
         after = self.process.memory_info().rss / 1024 / 1024
-        freed = before - after
+        freed = max(before - after, 0)
 
         text = (
-            f"<b>Garbage Collection:</b>\n"
-            f"├ Objects: <code>{collected}</code>\n"
-            f"├ Before: <code>{before:.2f} MB</code>\n"
-            f"├ After: <code>{after:.2f} MB</code>\n"
-            f"└ Freed: <code>{freed:.2f} MB</code>"
+            f"<b>Garbage Collection</b>\n"
+            f"• Objects: <code>{collected}</code>\n"
+            f"• Freed: <code>{freed:.2f} MB</code>"
         )
-
         await msg.reply_text(text, parse_mode="HTML")

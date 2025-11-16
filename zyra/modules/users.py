@@ -1,3 +1,4 @@
+import contextlib
 from typing import Dict, List, Optional, Tuple
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, User
@@ -30,14 +31,13 @@ class Users(Module):
             row = await conn.fetchrow(
                 "SELECT username FROM users WHERE id = $1", user.id
             )
-            if row:
-                if row["username"] != user.username:
-                    await conn.execute(
-                        "UPDATE users SET username = $1 WHERE id = $2",
-                        user.username,
-                        user.id,
-                    )
-            else:
+            if row and row["username"] != user.username:
+                await conn.execute(
+                    "UPDATE users SET username = $1 WHERE id = $2",
+                    user.username,
+                    user.id,
+                )
+            elif not row:
                 await conn.execute(
                     "INSERT INTO users (id, username) VALUES ($1, $2)",
                     user.id,
@@ -59,12 +59,12 @@ class Users(Module):
                 """
                 SELECT id, username, rank
                 FROM users
-                ORDER BY CASE rank
-                           WHEN 'sudoer' THEN 0
-                           WHEN 'nobody' THEN 2
-                           ELSE 1
-                         END,
-                         id
+                ORDER BY
+                    CASE rank
+                        WHEN 'sudoer' THEN 0
+                        WHEN 'nobody' THEN 2
+                        ELSE 1
+                    END, id
                 LIMIT $1 OFFSET $2
                 """,
                 limit,
@@ -73,61 +73,68 @@ class Users(Module):
 
         groups: Dict[str, List[dict]] = {"sudoer": [], "nobody": []}
         others: Dict[str, List[dict]] = {}
-
         for r in rows:
             rk = (r["rank"] or "nobody").lower()
-            if rk == "sudoer":
-                groups["sudoer"].append(r)
-            elif rk == "nobody":
-                groups["nobody"].append(r)
+            if rk in groups:
+                groups[rk].append(r)
             else:
                 others.setdefault(rk, []).append(r)
 
         def fmt_user(i: int, r: dict) -> str:
-            uname = r["username"]
             mention = (
-                f"@{uname}" if uname else f'<a href="tg://user?id={r["id"]}">user</a>'
+                f"@{r['username']}"
+                if r["username"]
+                else f'<a href="tg://user?id={r["id"]}">user</a>'
             )
             return f"{i}. {mention} <code>{r['id']}</code>"
 
         lines: List[str] = [
             "<b>👥 User List</b>",
-            f"Total: <b>{total}</b> • Showing: <b>{len(rows)}</b> • Offset: <b>{offset}</b>",
-            "",
+            f"Total: <b>{total}</b> • Showing: <b>{len(rows)}</b> • Offset: <b>{offset}</b>\n",
         ]
-
-        if groups["sudoer"]:
-            lines.append("🛡️ <b>Sudoers</b>")
-            lines.extend(fmt_user(i, r) for i, r in enumerate(groups["sudoer"], 1))
-            lines.append("")
+        for section, title in [
+            ("sudoer", "🛡️ <b>Sudoers</b>"),
+            ("nobody", "👤 <b>Nobody</b>"),
+        ]:
+            if groups[section]:
+                lines.append(title)
+                lines.extend(fmt_user(i, r) for i, r in enumerate(groups[section], 1))
+                lines.append("")
 
         if others:
             lines.append("🏷️ <b>Other Ranks</b>")
-            for rank_name in sorted(others.keys()):
-                lines.append(f"• <b>{rank_name}</b> (<i>{len(others[rank_name])}</i>)")
-                lines.extend(
-                    f"   {fmt_user(i, r)}" for i, r in enumerate(others[rank_name], 1)
-                )
+            for rank, users in sorted(others.items()):
+                lines.append(f"• <b>{rank}</b> (<i>{len(users)}</i>)")
+                lines.extend(f"   {fmt_user(i, r)}" for i, r in enumerate(users, 1))
                 lines.append("")
-
-        if groups["nobody"]:
-            lines.append("👤 <b>Nobody</b>")
-            lines.extend(fmt_user(i, r) for i, r in enumerate(groups["nobody"], 1))
-            lines.append("")
 
         if not rows:
             lines.append("<i>No users in this page.</i>")
 
-        kb = InlineKeyboardMarkup(
-            [
-                [
-                    InlineKeyboardButton(
-                        "🔄", callback_data=f"users:refresh:{limit}:{offset}"
-                    )
-                ],
-                [InlineKeyboardButton("✖️", callback_data="users:close")],
-            ]
-        )
+        has_prev = offset > 0
+        has_next = offset + limit < total
+        nav_buttons = []
+        if has_prev:
+            nav_buttons.append(
+                InlineKeyboardButton(
+                    "⬅️ Prev",
+                    callback_data=f"users:refresh:{limit}:{max(0, offset - limit)}",
+                )
+            )
+
+        if has_next:
+            nav_buttons.append(
+                InlineKeyboardButton(
+                    "➡️ Next", callback_data=f"users:refresh:{limit}:{offset + limit}"
+                )
+            )
+
+        kb_rows = []
+        if nav_buttons:
+            kb_rows.append(nav_buttons)
+
+        kb_rows.append([InlineKeyboardButton("✖️ Close", callback_data="users:close")])
+        kb = InlineKeyboardMarkup(kb_rows)
         return "\n".join(lines), kb
 
     @handler(["users", "userlist"], filters=sudo_only)
@@ -136,12 +143,11 @@ class Users(Module):
     ) -> None:
         msg = update.effective_message
         args = context.args or []
-
         try:
-            limit = max(1, min(200, int(args[0]))) if args else 50
+            limit = max(1, min(200, int(args[0]))) if args else 10
             offset = max(0, int(args[1])) if len(args) > 1 else 0
         except ValueError:
-            limit, offset = 50, 0
+            limit, offset = 10, 0
 
         text, kb = await self._render_userlist(limit, offset)
         await msg.reply_text(text, disable_web_page_preview=True, reply_markup=kb)
@@ -155,22 +161,23 @@ class Users(Module):
         if not parts:
             return
 
-        action = parts[0] if parts else None
-
+        action = parts[0]
         if action == "refresh":
-            await q.edit_message_text("<i>Refreshing...</i>")
+            with contextlib.suppress(Exception):
+                await q.edit_message_text("<i>…</i>")
+
             try:
-                limit = int(parts[1]) if len(parts) > 1 else 50
+                limit = int(parts[1]) if len(parts) > 1 else 10
                 offset = int(parts[2]) if len(parts) > 2 else 0
-            except (ValueError, IndexError):
-                limit, offset = 50, 0
-
-            text, kb = await self._render_userlist(limit, offset)
-            await q.edit_message_text(
-                text, disable_web_page_preview=True, reply_markup=kb
-            )
-            await q.answer("Refreshed")
-
+                text, kb = await self._render_userlist(limit, offset)
+                await q.edit_message_text(
+                    text, disable_web_page_preview=True, reply_markup=kb
+                )
+                await q.answer("Updated")
+            except Exception as e:
+                await q.answer(f"Error: {e}")
         elif action == "close":
-            await q.message.delete()
+            with contextlib.suppress(Exception):
+                await q.message.delete()
+
             await q.answer("Closed")
