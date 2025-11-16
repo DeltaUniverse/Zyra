@@ -52,7 +52,9 @@ class Exec(Module):
             return
 
         task = asyncio.create_task(
-            self._execute(sent, code, {"update": update, "context": context})
+            self._execute(
+                sent, code, {"update": update, "context": context, "msg": msg}
+            )
         )
         self._tasks[sent.id] = task
 
@@ -140,7 +142,9 @@ class Exec(Module):
             )
 
         task = asyncio.create_task(
-            self._execute(host_msg, code, {"update": update, "context": context})
+            self._execute(
+                host_msg, code, {"update": update, "context": context, "msg": host_msg}
+            )
         )
         self._tasks[host_msg.id] = task
 

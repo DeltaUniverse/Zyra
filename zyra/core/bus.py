@@ -1,4 +1,5 @@
 import inspect
+import re
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Optional, Sequence
 
@@ -9,6 +10,50 @@ from .events import Events, Hooks
 
 Func = Callable[..., Awaitable[Any]]
 Filter = Callable[..., bool | Awaitable[bool]]
+FilterFn = Callable[[Any, Any, Any], bool]
+
+
+def as_filter(source: Any, event_name: str) -> Optional[FilterFn]:
+    if source is None or callable(source):
+        return source
+
+    try:
+        from telegram.ext import filters as ptb_filters
+    except ImportError:
+        return source
+
+    if isinstance(source, ptb_filters.Regex):
+        pattern = (
+            re.compile(source.pattern)
+            if isinstance(source.pattern, str)
+            else source.pattern
+        )
+        if event_name == "callback_query":
+
+            def callback_filter(update: Any, _context: Any, _bot: Any) -> bool:
+                q = getattr(update, "callback_query", None)
+                data = getattr(q, "data", None)
+                return bool(data and pattern.search(data))
+
+            return callback_filter
+
+        def message_filter(update: Any, _context: Any, _bot: Any) -> bool:
+            msg = getattr(update, "effective_message", None)
+            text = getattr(msg, "text", None) or getattr(msg, "caption", None)
+            return bool(text and pattern.search(text))
+
+        return message_filter
+
+    if hasattr(source, "filter"):
+
+        def ptb_obj_filter(
+            update: Any, _context: Any, _bot: Any
+        ) -> bool | Awaitable[bool]:
+            return source.filter(update)
+
+        return ptb_obj_filter
+
+    return source
 
 
 @dataclass(order=True, slots=True)
@@ -21,14 +66,30 @@ class Listener:
     bot: Any = field(default=None, compare=False)
 
     async def check(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
-        if self.filters is None:
+        f = self.filters
+        if f is None:
             return True
 
-        result = self.filters(update, context, self.bot)
-        if inspect.isawaitable(result):
-            result = await result
+        try:
+            if hasattr(f, "filter"):
+                res = f.filter(update)
+            elif callable(f):
+                try:
+                    res = f(update, context, self.bot)
+                except TypeError:
+                    try:
+                        res = f(update, context)
+                    except TypeError:
+                        res = f(update)
+            else:
+                res = bool(f)
 
-        return bool(result)
+            if inspect.isawaitable(res):
+                res = await res
+
+            return bool(res)
+        except Exception:
+            return False
 
 
 def unwrap_method(fn: Any) -> Any:
@@ -36,7 +97,7 @@ def unwrap_method(fn: Any) -> Any:
 
 
 class EventBus:
-    def __init__(self, bot: Any, prefixes: tuple[str, ...] = ("/")):
+    def __init__(self, bot: Any, prefixes: tuple[str, ...] = ("/",)):
         self.bot = bot
         self.prefixes = prefixes
         self.listeners: dict[str, list[Listener]] = {}
@@ -50,15 +111,17 @@ class EventBus:
         priority: int = 100,
     ) -> None:
         event_str = event.value if isinstance(event, Events) else str(event)
-
+        hook_values = {h.value for h in Hooks}
+        eff_filters = (
+            None if event_str in hook_values else as_filter(filters, event_str)
+        )
         listener = Listener(
             priority=priority,
             event=event_str,
             func=func,
-            filters=filters if event_str not in {h.value for h in Hooks} else None,
+            filters=eff_filters,
             bot=self.bot,
         )
-
         bucket = self.listeners.setdefault(event_str, [])
         insert_idx = next(
             (i for i, existing in enumerate(bucket) if existing.priority > priority),
@@ -99,7 +162,6 @@ class EventBus:
 
             token = parts[0]
             args = parts[1].split() if len(parts) > 1 else []
-
             if "@" in token:
                 base, at_user = token.split("@", 1)
                 bot_username = getattr(self.bot, "bot_username", None)
@@ -130,22 +192,19 @@ class EventBus:
         cmd, args_list = parsed
         setattr(context, "args", args_list)
         setattr(context, "command", cmd)
-
         bucket = self.listeners.get(Events.COMMAND.value, [])
         if not bucket:
             return False
 
         cmd_lower = cmd.lower()
         handled = False
-
         for listener in bucket:
             if not await listener.check(update, context):
                 continue
 
             cmds = getattr(unwrap_method(listener.func), "_cmds", None)
-            if cmds:
-                if cmd_lower not in {c.lower() for c in cmds}:
-                    continue
+            if cmds and cmd_lower not in {c.lower() for c in cmds}:
+                continue
 
             await self._invoke(listener.func, update, context)
             handled = True
@@ -156,14 +215,13 @@ class EventBus:
         self, event: str | Events, update: Update, context: ContextTypes.DEFAULT_TYPE
     ) -> None:
         event_str = event.value if isinstance(event, Events) else str(event)
-
         if event_str == Events.MESSAGE.value:
             if await self.dispatch_command(update, context):
                 return
 
         bucket = self.listeners.get(event_str, [])
+        hook_values = {h.value for h in Hooks}
         for listener in bucket:
-            hook_values = {h.value for h in Hooks}
             if listener.event in hook_values or await listener.check(update, context):
                 await self._invoke(listener.func, update, context)
 

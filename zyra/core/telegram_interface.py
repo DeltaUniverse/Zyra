@@ -150,7 +150,7 @@ class TelegramInterface:
                 UpdateType.INLINE_QUERY,
                 UpdateType.CHOSEN_INLINE_RESULT,
             ],
-            drop_pending_updates=True,
+            drop_pending_updates=False,
         )
 
     async def stop(self) -> None:
