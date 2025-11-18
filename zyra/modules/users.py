@@ -1,11 +1,12 @@
 import contextlib
 from typing import Dict, List, Optional, Tuple
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, User
+from telegram import InlineKeyboardMarkup, Update, User
 from telegram.ext import ContextTypes
 
 from ..core.module import Module
 from ..decorators import handler, parse_callback, sudo_only
+from ..util.keyboard import KeyboardBuilder
 
 
 class Users(Module):
@@ -14,13 +15,11 @@ class Users(Module):
     async def on_load(self) -> None:
         async with self.bot.db.acquire() as conn:
             await conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS users (
+                """CREATE TABLE IF NOT EXISTS users (
                     id BIGINT PRIMARY KEY,
                     username TEXT,
                     rank TEXT DEFAULT 'nobody'
-                )
-                """
+                )"""
             )
 
     async def _update_user(self, user: Optional[User]) -> None:
@@ -56,29 +55,17 @@ class Users(Module):
         async with self.bot.db.acquire() as conn:
             total = await conn.fetchval("SELECT COUNT(*) FROM users")
             rows = await conn.fetch(
-                """
-                SELECT id, username, rank
-                FROM users
-                ORDER BY
-                    CASE rank
-                        WHEN 'sudoer' THEN 0
-                        WHEN 'nobody' THEN 2
-                        ELSE 1
-                    END, id
-                LIMIT $1 OFFSET $2
-                """,
+                """SELECT id, username, rank FROM users
+                ORDER BY CASE rank WHEN 'sudoer' THEN 0 WHEN 'nobody' THEN 2 ELSE 1 END, id
+                LIMIT $1 OFFSET $2""",
                 limit,
                 offset,
             )
-
         groups: Dict[str, List[dict]] = {"sudoer": [], "nobody": []}
         others: Dict[str, List[dict]] = {}
         for r in rows:
             rk = (r["rank"] or "nobody").lower()
-            if rk in groups:
-                groups[rk].append(r)
-            else:
-                others.setdefault(rk, []).append(r)
+            (groups[rk] if rk in groups else others.setdefault(rk, [])).append(r)
 
         def fmt_user(i: int, r: dict) -> str:
             mention = (
@@ -89,7 +76,7 @@ class Users(Module):
             return f"{i}. {mention} <code>{r['id']}</code>"
 
         lines: List[str] = [
-            "<b>👥 User List</b>",
+            f"<b>👥 User List</b>",
             f"Total: <b>{total}</b> • Showing: <b>{len(rows)}</b> • Offset: <b>{offset}</b>\n",
         ]
         for section, title in [
@@ -111,31 +98,15 @@ class Users(Module):
         if not rows:
             lines.append("<i>No users in this page.</i>")
 
-        has_prev = offset > 0
-        has_next = offset + limit < total
-        nav_buttons = []
-        if has_prev:
-            nav_buttons.append(
-                InlineKeyboardButton(
-                    "⬅️ Prev",
-                    callback_data=f"users:refresh:{limit}:{max(0, offset - limit)}",
-                )
-            )
+        kb = KeyboardBuilder()
+        if offset > 0:
+            kb.add_row(("⬅️", f"users:refresh:{limit}:{max(0, offset - limit)}"))
 
-        if has_next:
-            nav_buttons.append(
-                InlineKeyboardButton(
-                    "➡️ Next", callback_data=f"users:refresh:{limit}:{offset + limit}"
-                )
-            )
+        if offset + limit < total:
+            kb.add_row(("➡️", f"users:refresh:{limit}:{offset + limit}"))
 
-        kb_rows = []
-        if nav_buttons:
-            kb_rows.append(nav_buttons)
-
-        kb_rows.append([InlineKeyboardButton("✖️ Close", callback_data="users:close")])
-        kb = InlineKeyboardMarkup(kb_rows)
-        return "\n".join(lines), kb
+        kb.add_button("✖️ Close", "users:close")
+        return "\n".join(lines), kb.build()
 
     @handler(["users", "userlist"], filters=sudo_only)
     async def cmd_userlist(
@@ -163,9 +134,8 @@ class Users(Module):
 
         action = parts[0]
         if action == "refresh":
-            with contextlib.suppress(Exception):
-                await q.edit_message_text("<i>…</i>")
-
+            #  with contextlib.suppress(Exception):
+            #     await q.edit_message_text("<i>Refreshing…</i>")
             try:
                 limit = int(parts[1]) if len(parts) > 1 else 10
                 offset = int(parts[2]) if len(parts) > 2 else 0
@@ -173,7 +143,7 @@ class Users(Module):
                 await q.edit_message_text(
                     text, disable_web_page_preview=True, reply_markup=kb
                 )
-                await q.answer("Updated")
+
             except Exception as e:
                 await q.answer(f"Error: {e}")
         elif action == "close":
