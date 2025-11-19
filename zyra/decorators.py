@@ -2,34 +2,44 @@ from typing import Callable, Sequence
 
 from .core.events import Events, Hooks
 
+HOOK_VALUES = {h.value for h in Hooks}
+EVENT_VALUES = {e.value for e in Events}
+
 
 def handler(
     event: str | Sequence[str] | Events,
     *,
-    filters: Callable = None,
+    filters: Callable | None = None,
     priority: int = 100,
 ) -> Callable:
-    def wrap(fn: Callable) -> Callable:
-        if isinstance(event, (list, tuple, set)):
-            setattr(fn, "_evt", Events.COMMAND.value)
-            setattr(fn, "_cmds", tuple(event))
-            setattr(fn, "_flt", filters)
-            setattr(fn, "_prio", priority)
-            return fn
+    evt_value: str
+    cmds: tuple[str, ...] | None = None
 
-        ev = event.value if isinstance(event, Events) else str(event).strip().lower()
+    if isinstance(event, (list, tuple, set)):
+        cmds = tuple(str(x).strip().lower() for x in event)
+        evt_value = Events.COMMAND.value
+    else:
+        if isinstance(event, Events):
+            ev = event.value
+        else:
+            ev = str(event).strip().lower()
 
         if ev == "start":
-            setattr(fn, "_evt", Events.COMMAND.value)
-            setattr(fn, "_cmds", ("start",))
-            setattr(fn, "_flt", filters)
-            setattr(fn, "_prio", priority)
-            return fn
-
-        if ev in {h.value for h in Hooks}:
+            evt_value = Events.COMMAND.value
+            cmds = ("start",)
+        elif ev in HOOK_VALUES:
             raise ValueError("Hooks must be defined as on_<hook>() without decorators")
+        elif ev in EVENT_VALUES:
+            evt_value = ev
+        else:
+            evt_value = Events.COMMAND.value
+            cmds = (ev,)
 
-        setattr(fn, "_evt", ev)
+    def wrap(fn: Callable) -> Callable:
+        setattr(fn, "_evt", evt_value)
+        if cmds is not None:
+            setattr(fn, "_cmds", cmds)
+
         setattr(fn, "_flt", filters)
         setattr(fn, "_prio", priority)
         return fn
@@ -39,7 +49,7 @@ def handler(
 
 def owner_only(update, context, bot):
     user = getattr(update, "effective_user", None)
-    return user and user.id == bot.owner_id
+    return bool(user and user.id == bot.owner_id)
 
 
 def sudo_only(update, context, bot):
@@ -51,12 +61,13 @@ def sudo_only(update, context, bot):
 
 
 def rank_filter(rank: str):
+    r = rank.strip().lower()
+
     def check(update, context, bot):
         user = getattr(update, "effective_user", None)
         if not user:
             return False
 
-        r = rank.strip().lower()
         if r == "owner":
             return user.id == bot.owner_id
 
